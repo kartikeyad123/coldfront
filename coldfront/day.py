@@ -43,10 +43,16 @@ def tank_command(s: PlantSettings, price):
 
 
 def throttle_factor(s: PlantSettings, T_inlet):
-    """GPUs protect themselves: above the throttle temperature they cut power
-    by 8 % per kelvin, down to a floor of 40 % of demand."""
+    """GPUs protect themselves in two stages. Above the throttle temperature they
+    cut power by 8 % per kelvin, down to 40 % of demand. If the hall still keeps
+    heating, the servers shut down: power falls from 40 % to zero between 12 K
+    and 15 K above the throttle temperature. This bounds the hall temperature."""
     excess = T_inlet - (s.T_throttle + C2K)
-    return 1.0 if excess <= 0 else max(0.4, 1.0 - 0.08 * excess)
+    if excess <= 0:
+        return 1.0
+    if excess <= 12.0:
+        return max(0.4, 1.0 - 0.08 * excess)
+    return max(0.0, 0.4 * (15.0 - excess) / 3.0)
 
 
 def simulate_day(s: PlantSettings, climate_key="la_typical", workload_key="inference", dt=30.0,
@@ -138,7 +144,7 @@ def simulate_plan(plans, breaks, climate_key, workload_key, dt=30.0, tariff_key=
             P_crah=P_crah, P_cool=P_cool, P_over=P_over, P_total=P_total,
             Q_rej=p["Q_rej"], water=p["water"], evaporation=p["evaporation"], drift=p["drift"],
             blowdown=p["blowdown"], f_fc=p["f_fc"], T_sink=p["T_sink"] - C2K,
-            pue=P_total / Q_it, cost_rate=P_total / 1e6 * price,
+            pue=P_total / Q_it if Q_it > 0 else np.nan, cost_rate=P_total / 1e6 * price,
         ))
         if k == n:
             break
@@ -206,7 +212,7 @@ def day_metrics(s, x, dt, C_hall, E_tank):
         E_aux_MWh=E_aux * J2MWh,
         E_total_MWh=E_total * J2MWh,
         pue=E_total / E_it,
-        pue_peak=float(x["pue"].max()),
+        pue_peak=float(np.nanmax(x["pue"])),
         cop_mean=float(E_ch / E_comp) if E_comp > 0 else float("nan"),
         T_inlet_max=float(x["T_inlet"].max()),
         minutes_over_limit=float(above.sum() * dt / 60),

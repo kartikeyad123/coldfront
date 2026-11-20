@@ -133,6 +133,9 @@ class PlantSettings:
         return self.tank_MWh * 3.6e9 / (CP_WATER * self.dT_chw)
 
 
+MAX_FLOW = 1.5      # largest chilled-water flow, as a multiple of design flow
+
+
 def pump(s: PlantSettings, m, m_design, dP_design_kPa):
     """Variable-speed pump (SSSF). Head = static part + friction part that
     falls with flow squared. Returns (electrical W, shaft W). The shaft work is
@@ -216,7 +219,13 @@ def plant_step(s: PlantSettings, Q_demand, T_db, T_wb, tank_cmd=0.0, tank_soc=0.
         shortfall = remaining - Q_ch
         if s.tank and tank_cmd > 0 and tank_soc < 1:
             Q_chg = max(0.0, min(rate, s.charge_plr_max * capacity - Q_ch, chg_max))
-        m_chw = (Q_loop + Q_chg) / (CP_WATER * s.dT_chw)
+        # The pumps and valves have a largest flow (MAX_FLOW x the design flow at this
+        # temperature rise). Without it, an overloaded hall asks for ever more flow, the
+        # pump heat (which grows with flow cubed) adds to the load, and the loop runs away.
+        m_max = MAX_FLOW * max(m_chw_design, s.Q_design / (CP_WATER * s.dT_chw))
+        m_chw = min((Q_loop + Q_chg) / (CP_WATER * s.dT_chw), m_max)
+        if Q_fc + Q_dis + Q_ch + Q_chg <= 0.0:
+            m_chw = 0.0      # nothing can take the heat away: the controller stops the pumps
         P_chw, P_chw_shaft = pump(s, m_chw, m_chw_design, s.dP_chw_kPa)
     Q_ch_total = Q_ch + Q_chg
     ch = chiller_plant(s, Q_ch_total, T_sink, n_avail)

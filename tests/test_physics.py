@@ -127,3 +127,20 @@ def test_events_are_repeatable_and_state_is_continuous():
     assert a.series["T_inlet"][k] == pytest.approx(b.series["T_inlet"][k])   # state carried across the break
     assert a.series["n_avail"][k + 10] == 3 and a.series["price"][int(17 * 120)] > a.series["price"][int(15 * 120)]
     assert b.metrics["energy_balance_err_pct"] < 0.01
+
+
+def test_overloaded_plant_stays_finite():
+    """A badly undersized plant must overheat the hall, not crash the model:
+    the chilled-water flow is capped, so pump heat cannot run away."""
+    from coldfront.contracts import ORDERS, run_order
+    import numpy as np
+    from coldfront.plant import PlantSettings, MAX_FLOW
+    for o in ORDERS:
+        bad = dict(o.start, n_chillers=1, dT_chw=4.0, rejection="dry", eta_rated=0.6)
+        bad.update(o.locks)
+        day = run_order(o, [PlantSettings(**bad)] * (len(o.pauses) + 1), 24.0)
+        m = np.asarray(day.series["m_chw"])
+        assert np.all(np.isfinite(m))
+        assert np.all(np.isfinite(day.series["T_inlet"]))
+        s = day.settings if hasattr(day, "settings") and day.settings else PlantSettings(**bad)
+        assert m.max() <= MAX_FLOW * s.Q_design / (4186.0 * 4.0) * 1.01
