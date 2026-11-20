@@ -46,4 +46,4 @@ div[data-testid="stPopover"] button, .stButton button { border:1px solid #2A313B
 
 def header(subtitle=""):
     return f"""<div class="cf-bar"><div class="cf-brand">COLDFRONT</div>
-    <div class="cf-sub">{subtitle}</div><div class="cf-tag">AME 310 · refrigeration cycle</div></div>"""
+    <div class="cf-sub">{subtitle}</div><div class="cf-tag">Kartikeya Daiya</div></div>"""
