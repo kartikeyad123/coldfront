@@ -84,7 +84,7 @@ def money_chart(day):
     else:
         fig.add_trace(go.Scatter(x=t, y=x["pue"], name="PUE", line=dict(color=CYAN, width=2)), secondary_y=True)
     fig.update_yaxes(title_text="$/MWh  ·  $/h", secondary_y=False)
-    fig.update_yaxes(title_text="tank [%]" if s.tank else "PUE", secondary_y=True, showgrid=False)
+    fig.update_yaxes(title_text="tank [%]" if s.tank else "PUE", secondary_y=True, showgrid=False, tickformat=None if s.tank else ".3f")
     _hours(fig)
     return _style(fig, title="Price, cost and " + ("storage" if s.tank else "PUE"))
 

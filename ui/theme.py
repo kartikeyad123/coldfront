@@ -32,7 +32,9 @@ div[data-testid="stMetricLabel"] p { color:#8A929C !important; font-size:12px !i
 .cf-alert { border-left:3px solid #E06A50; background:#151A21; padding:12px 16px; border-radius:0 6px 6px 0; margin:8px 0; }
 .cf-note { border-left:3px solid #D9A441; background:#151A21; padding:12px 16px; border-radius:0 6px 6px 0; margin:8px 0; }
 .cf-grade { font-family:'Source Serif 4',Georgia,serif; font-size:64px; font-weight:600; line-height:1; }
-.cf-mono { color:#8A929C; font-size:12px; }
+.cf-mono { color:#8A929C; font-size:12.5px; line-height:1.5; }
+.cf-set { font-size:13.5px; margin:8px 0 0 0; }
+div[data-testid="stButtonGroup"] { flex-wrap:wrap; }
 .cf-badge { display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:11px; padding:1px 7px; border:1px solid #2A313B;
   border-radius:3px; color:#B4BAC2; margin-left:6px; }
 table.cf-t { width:100%; border-collapse:collapse; font-size:14px; }

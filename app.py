@@ -21,6 +21,7 @@ from ui import charts
 from ui.theme import CSS, header
 from ui.plant_view import plant_html
 from ui.cycle_view import cycle_html
+from ui import tour as T
 
 st.set_page_config(page_title="COLDFRONT", page_icon="❄", layout="wide", initial_sidebar_state="collapsed")
 st.markdown(CSS, unsafe_allow_html=True)
@@ -34,7 +35,7 @@ PRESETS = {
     "Dry (no water)": dict(rejection="dry", T_chws_C=16.0, dT_chw=8.0),
     "Liquid-cooled GPU hall": dict(rack_cooling="liquid", T_chws_C=30.0, dT_chw=8.0),
 }
-PLANT_H = 850
+PLANT_H = 930
 
 
 def go(view, **kw):
@@ -106,9 +107,9 @@ def settings_toolbar(prefix, locks=None, defaults=None):
                                      key=prefix + "rc", disabled="rack_cooling" in locks)
         hi = 20.0 if v["rack_cooling"] == "air" else 40.0
         v["T_chws_C"] = st.slider("Water supply temperature [°C]", 6.0, hi, min(float(d["T_chws_C"]), hi), 0.5,
-                                  key=prefix + "chws" + v["rack_cooling"])
-        v["dT_chw"] = st.slider("Return minus supply [K]", 4.0, 12.0, float(d["dT_chw"]), 0.5, key=prefix + "dt")
-        st.caption("Warmer water means a smaller lift and less compressor work. "
+                                  key=prefix + "chws" + v["rack_cooling"], format="%.1f")
+        v["dT_chw"] = st.slider("How much the water warms up in the hall [°C]", 4.0, 12.0, float(d["dT_chw"]), 0.5, key=prefix + "dt", format="%.1f")
+        st.caption("Warmer water is easier for the chillers to make, so they use less electricity. "
                    "The racks receive this water plus " + ("8 K." if v["rack_cooling"] == "air" else "4 K."))
     with c[1].popover("Chillers", width="stretch"):
         v["n_chillers"] = st.slider("Chillers available", 1, 4, int(d["n_chillers"]), key=prefix + "n",
@@ -136,6 +137,20 @@ def settings_toolbar(prefix, locks=None, defaults=None):
         v["price_discharge"] = st.slider("Discharge when the price is at or above [$/MWh]", 20.0, 300.0,
                                          float(d["price_discharge"]), 5.0, key=prefix + "pd", disabled=off)
     v.update(locks)
+    base = PlantSettings().__dict__
+    base.update(defaults or {})
+    base.update(locks)
+    def item(text, keys):
+        changed = any(v.get(k) != base.get(k) for k in keys)
+        return f'<span style="color:{"#6FA8DC" if changed else "#B4BAC2"}">{text}{" (changed)" if changed else ""}</span>'
+    parts = [item(f"water {v['T_chws_C']:g} °C, rise {v['dT_chw']:g} °C", ("T_chws_C", "dT_chw")),
+             item(f"{v['n_chillers']} chillers, {v['fluid'].replace('(E)', '')}", ("n_chillers", "fluid", "eta_rated")),
+             item(("cooling tower" if v["rejection"] == "tower" else "dry cooler") + (", free cooling on" if v["free_cooling"] else ", free cooling off"), ("rejection", "free_cooling")),
+             item(f"tank {v['tank_MWh']:g} MWh" if v["tank"] else "no tank", ("tank", "tank_MWh", "tank_rate_MW", "price_charge", "price_discharge")),
+             item("liquid-cooled racks" if v["rack_cooling"] == "liquid" else "air-cooled racks", ("rack_cooling",))]
+    st.markdown('<div class="cf-set"><span style="color:#8A929C">Set now:</span> ' + " · ".join(parts) + '</div>'
+                '<div class="cf-mono" style="margin:2px 0 8px 0">These four buttons are your controls. Open one, change it, '
+                'then click anywhere outside to close it.</div>', unsafe_allow_html=True)
     return v
 
 
@@ -162,11 +177,11 @@ def what_happened(day, prev=None):
                    f"{x['shortfall'][k] / 1e6:.1f} MW short, the hall reached {m['T_inlet_max']:.1f} °C and the GPUs gave up "
                    f"{m['compute_lost_pct']:.1f} % of the day's compute.")
     else:
-        out.append(f"<b>The servers stayed safe</b>, with {m['margin_T']:.1f} K to spare at the worst moment.")
+        out.append(f"<b>The servers stayed safe</b>, with {m['margin_T']:.1f} °C to spare at the worst moment.")
     if m["cop_mean"] == m["cop_mean"]:
         lift = float(np.nanmean(np.where(x["n_on"] > 0, x["T_cond"] - x["T_evap"], np.nan)))
-        out.append(f"The chillers lifted heat across {lift:.0f} K on average and reached an electrical COP of "
-                   f"{m['cop_mean']:.1f}, about {100 * m['eff2_mean']:.0f} % of the Carnot limit for the cycle.")
+        out.append(f"The chillers lifted heat across a {lift:.0f} °C gap on average and delivered {m['cop_mean']:.1f} units "
+                   f"of cooling per unit of electricity (COP), about {100 * m['eff2_mean']:.0f} % of the theoretical best.")
     else:
         out.append("The chillers never ran: the outdoor air carried the whole load through the free-cooling exchanger.")
     if m["free_cooling_hours"] > 0.2 and m["cop_mean"] == m["cop_mean"]:
@@ -180,13 +195,15 @@ def what_happened(day, prev=None):
         why = ""
         if prev["cop_mean"] == prev["cop_mean"] and m["cop_mean"] == m["cop_mean"]:
             why = f" The chiller COP went from {prev['cop_mean']:.1f} to {m['cop_mean']:.1f}."
-        out.append(f"<b>Compared with your last run</b>, the PUE {'rose' if d > 0 else 'fell'} by {abs(d):.3f}.{why}")
+        out.insert(0, f"<b>Compared with your last run</b>, the PUE {'rose' if d > 0 else 'fell'} by {abs(d):.3f} "
+                      f"({'worse' if d > 0 else 'better'}).{why}")
     return " ".join(out)
 
 
 def day_dashboard(day, key, anim=None, start="hot"):
+    st.caption("Press Play day or drag the slider to move through the day. Click any equipment in the drawing "
+               "(a chiller, the tower, the data hall) to see inside it.")
     st.iframe(plant_html(day, start=start), height=PLANT_H)
-    st.caption("Click any equipment in the drawing to see inside it. Drag the slider to move through the day.")
     H("The day in numbers")
     scorecard(day.metrics, day.settings)
     a, b = st.columns(2)
@@ -210,7 +227,12 @@ def day_dashboard(day, key, anim=None, start="hot"):
 st.session_state.setdefault("view", "Home")
 st.session_state.setdefault("grades", {})
 st.markdown(header("Run the cooling plant of an AI data center"), unsafe_allow_html=True)
-view = st.segmented_control("View", VIEWS, key="view", label_visibility="collapsed") or "Home"
+_nav = st.columns([6, 1])
+with _nav[0]:
+    view = st.segmented_control("View", VIEWS, key="view", label_visibility="collapsed") or "Home"
+_nav[1].button("Take the tour", width="stretch",
+               on_click=lambda: st.session_state.update(tour_force=st.session_state.get("tour_force", 0) + 1))
+FORCE = st.session_state.get("tour_force")
 
 # ---------------------------------------------------------------- HOME
 if view == "Home":
@@ -232,9 +254,11 @@ if view == "Home":
         fact = lambda big, small: (f'<div class="cf-card" style="padding:12px 14px"><div class="cf-num" style="font-size:21px">{big}</div>'
                                    f'<div style="color:#8A929C;font-size:12.5px;margin-top:4px">{small}</div></div>')
         m = st.columns(3)
-        m[0].markdown(fact(f"PUE {air['pue']:.2f} → {liq['pue']:.2f}", "Phoenix, 43 °C day, with warm-water liquid cooling"), unsafe_allow_html=True)
-        m[1].markdown(fact(f"{air['E_comp_MWh']:.0f} → {liq['E_comp_MWh']:.0f} MWh", "compressor energy per day: the chillers switch off"), unsafe_allow_html=True)
-        m[2].markdown(fact(f"{P_iplv():.2f} kW/ton", "chiller part-load rating, inside the 0.38 code limit"), unsafe_allow_html=True)
+        m[0].markdown(fact(f"{air['pue']:.2f} → {liq['pue']:.2f}", "PUE in Phoenix on a 43 °C day, with warm-water liquid cooling"), unsafe_allow_html=True)
+        m[1].markdown(fact(f"{air['E_comp_MWh']:.0f} → {liq['E_comp_MWh']:.0f} MWh", "chiller electricity per day: with warm water the chillers switch off"), unsafe_allow_html=True)
+        lost = run_day(freeze(dict(n_chillers=3)), "la_typical", "training").metrics["compute_lost_pct"]
+        m[2].markdown(fact(f"{lost:.1f} % lost", "of a day's computing when one chiller fails during a night training run"), unsafe_allow_html=True)
+        st.markdown('<div class="cf-mono">PUE = total power ÷ computer power. 1.00 would be perfect; lower is better.</div>', unsafe_allow_html=True)
         H("How it works")
         card("<b>1. Pick a shift.</b> Six work orders, from a quiet first day to a chiller failure at 1:30 a.m. "
              "All are open.<br><b>2. Set the plant.</b> Water temperature, chillers, tower or dry cooler, storage.<br>"
@@ -243,8 +267,9 @@ if view == "Home":
              "<b>Curious?</b> Click any equipment for its equations and live numbers, or open <b>Proof</b> to see how "
              "the model was checked.")
     with R:
-        st.iframe(plant_html(run_day(freeze({}), "la_hot", "inference"), autoplay=True, start="zero", compact=True), height=440)
+        st.iframe(plant_html(run_day(freeze({}), "la_hot", "inference"), autoplay=True, start="zero", compact=True), height=380)
         st.caption("A hot day in Los Angeles, as built: four chillers, a cooling tower, air-cooled racks.")
+    T.tour("home", T.HOME, FORCE)
 
 # ---------------------------------------------------------------- WORK ORDERS
 elif view == "Work orders":
@@ -257,11 +282,11 @@ elif view == "Work orders":
             for colm, o in zip(cols, ORDERS[i:i + 3]):
                 with colm:
                     g = st.session_state["grades"].get(o.key)
-                    card(f'<span class="cf-mono">WORK ORDER {o.number} · {o.client}</span><br>'
+                    card(f'<div style="min-height:215px"><span class="cf-mono">WORK ORDER {o.number} · {o.client}</span><br>'
                          f'<span style="font-size:19px;font-weight:600">{o.title}</span>'
                          f'{"<span class=cf-badge>grade " + g + "</span>" if g else ""}<br>'
                          f'<span style="color:#B4BAC2">{o.brief}</span><br>'
-                         f'<span class="cf-mono">You will use: {o.teaches}</span>')
+                         f'<span class="cf-mono">Idea: {o.teaches}</span></div>')
                     st.button("Open", key="open" + o.key, width="stretch", on_click=go, args=("Work orders",),
                               kwargs=dict(wo_key=o.key))
     else:
@@ -292,7 +317,9 @@ elif view == "Work orders":
                 else:
                     a = f"≤ {f.format(t.a_level)} {t.unit}" if t.a_level is not None else "meet the limit"
                     h += f"<tr><td>{t.label}</td><td class='n'>{lim}</td><td class='n'>{a}</td></tr>"
-            return h + "</table>"
+            return (h + "</table><div class='cf-mono' style='margin-top:8px'>PUE = total power ÷ computer power; lower is better. "
+                    "Server inlet = temperature of the air (or coolant) reaching the servers. "
+                    "Compute lost = work the GPUs skipped because they got too hot.</div>")
 
         def guide(step):
             if o.guide and step < len(o.guide):
@@ -302,12 +329,12 @@ elif view == "Work orders":
             a, b = st.columns([1.2, 1])
             with a:
                 card(f"<b>The job.</b> {o.brief}<br><br><b>Grading.</b> A: every target met and the efficiency target "
-                     f"beaten. B: every target met. C: servers safe, efficiency missed. D: a safety limit broken.")
+                     f"beaten. B: every target met. C: servers safe, efficiency missed. D: a safety limit broken.", "cf-card cf-job")
                 if o.events:
                     card("<b>Expect:</b> the shift pauses when something happens, so you can change the plant and resume.", "cf-note")
             with b:
-                card(targets_table())
-            guide(0)
+                card(targets_table(), "cf-card cf-targets")
+            guide(2 if ("wo_prev_" + key) in st.session_state else 0)
             H("Set the plant for the start of the shift")
             v = settings_toolbar(f"wo{key}0", o.locks, o.start)
             if o.locks:
@@ -315,19 +342,23 @@ elif view == "Work orders":
             st.button("Start shift", type="primary", on_click=lambda: plans.append(v))
             with st.expander("Hint"):
                 st.write(o.hint)
+            T.tour("brief", T.BRIEF, FORCE)
         else:
             day = run_wo(key, tuple(freeze(p) for p in plans), until)
             if not finished:                             # ---- paused at an event
                 ev = [e for e in o.events if e.pause][stage - 1]
                 card(f'<span class="cf-mono">PAUSED AT {int(ev.t):02d}:{int(ev.t % 1 * 60):02d}</span><br>'
                      f'<span style="font-size:18px;font-weight:600">{ev.title}</span><br>{ev.text}',
-                     "cf-alert" if ev.kind == "trip" else "cf-note")
+                     ("cf-alert" if ev.kind == "trip" else "cf-note") + " cf-event")
                 H("Change the plant, then resume")
                 v = settings_toolbar(f"wo{key}{stage}", o.locks, plans[-1])
                 c = st.columns([1, 1, 4])
                 c[0].button("Resume shift", type="primary", width="stretch", on_click=lambda: plans.append(v))
                 c[1].button("Restart", width="stretch", on_click=lambda: plans.clear())
+                with st.expander("Hint"):
+                    st.write(o.hint)
                 st.iframe(plant_html(day, start="end", focus="hall" if ev.kind in ("trip", "load") else "tower"), height=PLANT_H)
+                T.tour("pause", T.PAUSE, FORCE)
             else:                                        # ---- debrief
                 grade, rows = evaluate(o, day.metrics)
                 best = st.session_state["grades"].get(key)
@@ -338,14 +369,14 @@ elif view == "Work orders":
                 with a:
                     card(f'<span class="cf-mono">SHIFT COMPLETE · GRADE</span><br><span class="cf-grade" style="color:{colr}">{grade}</span><br>'
                          + {"A": "Every target met, with margin.", "B": "Every target met.",
-                            "C": "Servers safe. Efficiency target missed.", "D": "A safety limit was broken."}[grade])
+                            "C": "Servers safe. Efficiency target missed.", "D": "A safety limit was broken."}[grade], "cf-card cf-gradecard")
                 with b:
-                    card(targets_table(rows))
+                    card(targets_table(rows), "cf-card cf-targets")
                 if o.guide:
                     guide(1 if grade in "CD" else 3)
                     if grade in "CD":
                         guide(2)
-                card("<b>What happened.</b> " + what_happened(day, st.session_state.get("wo_prev_" + key)))
+                card("<b>What happened.</b> " + what_happened(day, st.session_state.get("wo_prev_" + key)), "cf-card cf-what")
                 if grade in "AB":
                     card("<b>Why it worked.</b> " + o.lesson, "cf-note")
                 else:
@@ -360,12 +391,13 @@ elif view == "Work orders":
                 nxt = ORDERS[(ORDERS.index(o) + 1) % len(ORDERS)]
                 c[1].button(f"Next: {nxt.title}", width="stretch", on_click=go, args=("Work orders",), kwargs=dict(wo_key=nxt.key))
                 day_dashboard(day, "wo" + key)
+                T.tour("result", T.RESULT, FORCE)
 
 # ---------------------------------------------------------------- CONSOLE (free play)
 elif view == "Console":
     st.markdown("### Console")
     st.caption("Free play. Any site, any workload, any plant. Nothing is locked and nothing is graded.")
-    c = st.columns([1.3, 1.3, 1.3, 1.6])
+    c = st.columns([1.2, 1.1, 1.9, 1.3])
     climate = c[0].selectbox("Site and weather", list(CLIMATES), format_func=lambda k: CLIMATES[k].label)
     workload = c[1].selectbox("Workload", list(WORKLOADS), format_func=lambda k: WORKLOADS[k].label)
     tariff = c[2].selectbox("Electricity price", list(TARIFFS), format_func=lambda k: TARIFFS[k].label)
@@ -412,9 +444,9 @@ elif view == "Chiller lab":
         g = st.columns(5)
         g[0].metric("COP", f"{cyc.cop:.2f}")
         g[1].metric("Carnot COP", f"{cyc.cop_carnot:.2f}")
-        g[2].metric("Second-law efficiency", f"{100 * cyc.second_law_eff:.0f} %")
-        g[3].metric("Cooling capacity", f"{Q_kW:,.0f} kW")
-        g[4].metric("Compressor power", f"{W_kW:,.0f} kW")
+        g[2].metric("Share of Carnot", f"{100 * cyc.second_law_eff:.0f} %")
+        g[3].metric("Cooling", f"{Q_kW:,.0f} kW")
+        g[4].metric("Power in", f"{W_kW:,.0f} kW")
     a, b = st.columns(2)
     a.plotly_chart(charts.ph_diagram(cyc), width="stretch")
     b.plotly_chart(charts.ts_diagram(cyc), width="stretch")
@@ -490,7 +522,8 @@ else:
     P = proof_data()
     H("1 · The cycle against a textbook")
     st.write("Çengel and Boles, Example 11-1: ideal R-134a cycle, 0.14 to 0.8 MPa, 0.05 kg/s.")
-    st.dataframe(pd.DataFrame(P["tb"]).rename(columns={"error_pct": "difference [%]"}).style.format(precision=3),
+    names = {"Q_L_kW": "Cooling, Q_L [kW]", "W_kW": "Compressor work, W [kW]", "Q_H_kW": "Heat rejected, Q_H [kW]", "COP": "COP"}
+    st.dataframe(pd.DataFrame(P["tb"]).assign(quantity=lambda d: d["quantity"].map(names)).rename(columns={"error_pct": "difference [%]"}).style.format(precision=3),
                  hide_index=True, width="stretch")
     with st.expander("One cycle by hand, the way it is done from property tables"):
         w = P["we"]

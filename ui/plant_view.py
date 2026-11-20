@@ -99,13 +99,15 @@ _TEMPLATE = r"""
  #panel .badge{font-family:'IBM Plex Mono',monospace;font-size:11px;border:1px solid #2A313B;border-radius:3px;padding:1px 7px;color:#B4BAC2}
  #panel .why{color:#8A929C;font-size:12.5px;line-height:1.45;margin-top:8px}
  #panel .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 18px;align-content:start}
- #panel .kv{display:flex;justify-content:space-between;font-size:12.5px;border-bottom:1px solid #20262E;padding:3px 0}
+ #panel .kv{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;border-bottom:1px solid #20262E;padding:3px 0}
  #panel .kv span:first-child{color:#8A929C}
- #panel .kv span:last-child{font-family:'IBM Plex Mono',monospace}
+ #panel .kv span:last-child{font-family:'IBM Plex Mono',monospace;text-align:right}
+ #svwrap{overflow-x:auto}
+ #svwrap svg{min-width:720px}
  #panel .eq{font-family:'IBM Plex Mono',monospace;font-size:12px;color:#B4BAC2;line-height:1.7}
  #panel .eqh{color:#8A929C;font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px}
 </style>
-<svg id="sv" viewBox="0 0 1200 600" width="100%" style="background:#0E1116;border:1px solid #2A313B;border-radius:6px">
+<div id="svwrap"><svg id="sv" viewBox="0 0 1200 600" width="100%" style="background:#0E1116;border:1px solid #2A313B;border-radius:6px">
  <rect id="alert_bg" x="0" y="0" width="1200" height="26" fill="#E06A50" opacity="0"/>
  <text id="alert_tx" x="600" y="18" text-anchor="middle" font-size="12.5" font-weight="600" fill="#0E1116"></text>
  <text x="24" y="52" class="lab">Outside</text>
@@ -190,7 +192,8 @@ _TEMPLATE = r"""
  <rect id="mix_sh" x="200" y="550" width="0" height="14" fill="#E06A50"/>
  <text x="780" y="562" font-size="11.5" fill="#B4BAC2"><tspan fill="#6FA8DC">■</tspan> outside air  <tspan fill="#8FB39A" dx="8">■</tspan> storage  <tspan fill="#D9A441" dx="8">■</tspan> chillers  <tspan fill="#E06A50" dx="8">■</tspan> unmet</text>
  <text id="hud_power" x="200" y="586" font-size="12" class="num" fill="#8A929C">--</text>
-</svg>
+ <text id="clickhint" x="1176" y="586" text-anchor="end" font-size="12" fill="#6FA8DC">click any equipment for details</text>
+</svg></div>
 <div class="bar">
  <button id="play">Play day</button>
  <input id="scrub" type="range" min="0" max="0" value="0"/>
@@ -355,7 +358,7 @@ $("play").onclick=()=>{
   timer=setInterval(()=>{i++; if(i>=N){ if(C.autoplay){i=0;} else {i=N-1;stop("Replay");} } draw();}, +$("speed").value);
 };
 $("speed").onchange=()=>{if(timer){stop("Play day");$("play").click();}};
-if(C.compact){$("panel").style.display="none";$("ticks").style.display="none";}
+if(C.compact){$("panel").style.display="none";$("ticks").style.display="none";$("clickhint").style.display="none";$("sv").style.minWidth="0";}
 if(C.start==="end") i=N-1; else if(C.start==="zero") i=0; else { const mx=Math.max(...D.Tin), mn=Math.min(...D.Tin); i = (mx-mn>0.2) ? D.Tin.indexOf(mx) : D.Tdb.indexOf(Math.max(...D.Tdb)); if(i<0)i=0; }
 draw(); animatePipes();
 if(C.autoplay){ i=0; $("play").click(); }
