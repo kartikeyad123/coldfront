@@ -12,7 +12,7 @@ CSS = """
 html, body, [class*="css"], .stMarkdown, p, label, li, td, th, input, textarea, select, button {
   font-family: 'Inter', sans-serif !important; }
 h1, h2, h3 { font-family: 'Source Serif 4', Georgia, serif !important; font-weight: 600 !important; letter-spacing: -0.01em; }
-.block-container { padding-top: 1.4rem; max-width: 1320px; }
+.block-container { padding-top: 3.6rem; max-width: 1320px; }
 header[data-testid="stHeader"] { background: transparent; }
 .cf-bar { display:flex; align-items:baseline; gap:16px; border-bottom:1px solid #2A313B; padding-bottom:10px; margin-bottom:14px; }
 .cf-brand { font-family:'Inter',sans-serif; font-size:15px; font-weight:600; color:#E6E8EB; letter-spacing:.32em; }
