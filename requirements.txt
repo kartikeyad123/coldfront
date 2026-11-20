@@ -1,0 +1,7 @@
+numpy
+scipy
+pandas
+plotly
+streamlit>=1.50
+CoolProp
+pytest
