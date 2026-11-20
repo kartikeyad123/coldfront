@@ -23,7 +23,7 @@ HOME = [
     dict(button="Start first shift", title="Start here",
          text="Your first mission is guided. It takes two minutes and teaches the one idea behind everything else."),
     dict(button="Open the console", title="Or just explore",
-         text="The console is free play: any city, any plant, nothing graded. You can come back to it any time."),
+         text="The console is free play. Pick any city and any plant and just experiment. There are no targets to hit."),
     dict(css='[data-testid="stButtonGroup"], [role="radiogroup"]', title="Six views",
          text="Work orders are the missions. Chiller lab is one refrigeration cycle on its own. Compare runs two plans side by side. Proof shows how the model was checked. Now press Start first shift.", last="Got it"),
 ]
@@ -31,7 +31,7 @@ HOME = [
 BRIEF = [
     dict(css=".cf-job", title="Your job for this shift",
          text="Every work order is one day at a client's site. This card says what you must achieve."),
-    dict(css=".cf-targets", title="How you are graded",
+    dict(css=".cf-targets", title="What earns a good grade",
          text="Each target has a limit. Stay inside every limit to pass. PUE is total power divided by computer power, so lower is better."),
     dict(css=".cf-guide", title="Follow the blue card",
          text="On this first mission a blue guide card always tells you the next step."),
@@ -42,8 +42,8 @@ BRIEF = [
 ]
 
 RESULT = [
-    dict(css=".cf-gradecard", title="Your grade",
-         text="A and B are passes. C means the servers were safe but the plant wasted energy. D means a safety limit was broken."),
+    dict(css=".cf-gradecard", title="The grade for this attempt",
+         text="A means every target met with room to spare. B is a pass. C means the servers were safe but the plant wasted energy. D means a safety limit was crossed. It is only this attempt: retry any time."),
     dict(css=".cf-targets", title="Why you got it",
          text="Each row shows the limit, what you achieved and the margin between them. Green is inside the limit, red is outside."),
     dict(css=".cf-what", title="What happened, in plain words",

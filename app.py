@@ -37,6 +37,23 @@ PRESETS = {
 }
 PLANT_H = 930
 
+# Small line drawings for the work-order cards (decoration only)
+_L = 'fill="none" stroke="#5E6670" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"'
+ART = {
+    "first_shift": f'<path {_L} d="M8 78 H132"/><path fill="none" stroke="#D9A441" stroke-width="1.8" stroke-linecap="round" d="M44 78 a26 26 0 0 1 52 0 M70 38 V28 M40 50 l-7 -7 M100 50 l7 -7 M30 78 h-9 M119 78 h-9"/>'
+                   f'<path {_L} d="M100 78 V60 h22 v18 M106 66 h10 M106 72 h10"/>',
+    "heatwave": f'<circle cx="52" cy="42" r="19" fill="none" stroke="#D97B3F" stroke-width="1.8"/><path fill="none" stroke="#D97B3F" stroke-width="1.8" stroke-linecap="round" d="M52 12 v-7 M52 79 v-7 M22 42 h-7 M89 42 h-7 M31 21 l-5 -5 M73 21 l5 -5 M31 63 l-5 5 M73 63 l5 5"/>'
+                f'<path {_L} d="M108 18 a6 6 0 0 1 12 0 V56 a11 11 0 1 1 -12 0 Z M114 64 V34"/>',
+    "chiller_down": f'<path fill="none" stroke="#D9A441" stroke-width="1.8" stroke-linecap="round" d="M40 16 a20 20 0 1 0 18 28 a16 16 0 0 1 -18 -28 Z"/>'
+                    f'<rect x="78" y="26" width="44" height="52" rx="3" fill="none" stroke="#E06A50" stroke-width="1.6" stroke-dasharray="5 4"/><path fill="none" stroke="#E06A50" stroke-width="1.8" stroke-linecap="round" d="M90 42 l20 20 M110 42 l-20 20"/>',
+    "price_spike": f'<path {_L} d="M14 10 V78 H130"/><path fill="none" stroke="#D9A441" stroke-width="2" stroke-linejoin="round" d="M14 62 H40 V54 H76 V18 H104 V56 H130"/>',
+    "not_a_drop": f'<path fill="none" stroke="#6FA8DC" stroke-width="1.8" stroke-linejoin="round" d="M70 10 C56 32 46 44 46 56 a24 24 0 0 0 48 0 C94 44 84 32 70 10 Z"/><path fill="none" stroke="#D97B3F" stroke-width="2.2" stroke-linecap="round" d="M34 78 L106 16"/>',
+    "blackwell": f'<rect x="42" y="8" width="56" height="74" rx="3" {_L}/><path {_L} d="M50 22 h40 M50 36 h40 M50 50 h40 M50 64 h40"/>'
+                 f'<path fill="none" stroke="#6FA8DC" stroke-width="1.8" stroke-linecap="round" d="M14 30 H42 M14 58 H42 M98 30 H126 M98 58 H126"/>',
+}
+VERDICT = {"A": "Excellent shift. Every target met, with room to spare.", "B": "Solid shift. Every target met.",
+           "C": "Safe, but wasteful. The efficiency target was missed.", "D": "A safety limit was crossed. Try another setup."}
+
 
 def go(view, **kw):
     st.session_state["view"] = view
@@ -263,7 +280,7 @@ if view == "Home":
         card("<b>1. Pick a shift.</b> Six work orders, from a quiet first day to a chiller failure at 1:30 a.m. "
              "All are open.<br><b>2. Set the plant.</b> Water temperature, chillers, tower or dry cooler, storage.<br>"
              "<b>3. Run the day.</b> It pauses when something happens so you can react.<br>"
-             "<b>4. Read the grade.</b> It comes from engineering margins: degrees, percent, kilowatt-hours.<br>"
+             "<b>4. See how it went.</b> Each attempt earns a grade from A to D. Retry as often as you like; your best one is kept.<br>"
              "<b>Curious?</b> Click any equipment for its equations and live numbers, or open <b>Proof</b> to see how "
              "the model was checked.")
     with R:
@@ -282,9 +299,11 @@ elif view == "Work orders":
             for colm, o in zip(cols, ORDERS[i:i + 3]):
                 with colm:
                     g = st.session_state["grades"].get(o.key)
-                    card(f'<div style="min-height:215px"><span class="cf-mono">WORK ORDER {o.number} · {o.client}</span><br>'
+                    card(f'<div style="min-height:215px;position:relative">'
+                         f'<svg viewBox="0 0 140 90" width="124" style="position:absolute;top:-2px;right:-4px">{ART[o.key]}</svg>'
+                         f'<div style="padding-right:128px;min-height:84px"><span class="cf-mono">WORK ORDER {o.number} · {o.client}</span><br>'
                          f'<span style="font-size:19px;font-weight:600">{o.title}</span>'
-                         f'{"<span class=cf-badge>grade " + g + "</span>" if g else ""}<br>'
+                         f'{"<br><span class=cf-badge style=margin-left:0>BEST SO FAR · " + g + "</span>" if g else ""}</div>'
                          f'<span style="color:#B4BAC2">{o.brief}</span><br>'
                          f'<span class="cf-mono">Idea: {o.teaches}</span></div>')
                     st.button("Open", key="open" + o.key, width="stretch", on_click=go, args=("Work orders",),
@@ -304,7 +323,7 @@ elif view == "Work orders":
         until = 24.0 if finished or stage == 0 else pauses[stage - 1]
 
         def targets_table(rows=None):
-            h = "<table class='cf-t'><tr><th>Target</th><th>Limit</th>" + ("<th>Achieved</th><th>Margin</th><th></th>" if rows else "<th>For grade A</th>") + "</tr>"
+            h = "<table class='cf-t'><tr><th>Target</th><th>Limit</th>" + ("<th>Achieved</th><th>Margin</th><th></th>" if rows else "<th>For an A</th>") + "</tr>"
             for i, t in enumerate(o.targets):
                 f = f"{{:,.{t.nd}f}}"
                 lim = f"≤ {f.format(t.limit)} {t.unit}"
@@ -328,8 +347,8 @@ elif view == "Work orders":
         if stage == 0:                                   # ---- briefing
             a, b = st.columns([1.2, 1])
             with a:
-                card(f"<b>The job.</b> {o.brief}<br><br><b>Grading.</b> A: every target met and the efficiency target "
-                     f"beaten. B: every target met. C: servers safe, efficiency missed. D: a safety limit broken.", "cf-card cf-job")
+                card(f"<b>The job.</b> {o.brief}<br><br><b>How it is scored.</b> Each attempt earns a grade for the setup you chose. A: every target met, with room "
+                     f"to spare. B: every target met. C: servers safe, efficiency missed. D: a safety limit crossed. Retry as often as you like.", "cf-card cf-job")
                 if o.events:
                     card("<b>Expect:</b> the shift pauses when something happens, so you can change the plant and resume.", "cf-note")
             with b:
@@ -365,11 +384,10 @@ elif view == "Work orders":
                 if best is None or grade < best:
                     st.session_state["grades"][key] = grade
                 a, b = st.columns([1, 2.4])
-                colr = {"A": "#8FB39A", "B": "#8FB39A", "C": "#D9A441", "D": "#E06A50"}[grade]
+                colr = {"A": "#D9A441", "B": "#D9A441", "C": "#D9A441", "D": "#8A929C"}[grade]
                 with a:
-                    card(f'<span class="cf-mono">SHIFT COMPLETE · GRADE</span><br><span class="cf-grade" style="color:{colr}">{grade}</span><br>'
-                         + {"A": "Every target met, with margin.", "B": "Every target met.",
-                            "C": "Servers safe. Efficiency target missed.", "D": "A safety limit was broken."}[grade], "cf-card cf-gradecard")
+                    card(f'<span class="cf-mono">SHIFT COMPLETE</span><br><span class="cf-grade" style="color:{colr}">{grade}</span><br>'
+                         + VERDICT[grade], "cf-card cf-gradecard")
                 with b:
                     card(targets_table(rows), "cf-card cf-targets")
                 if o.guide:
@@ -396,7 +414,7 @@ elif view == "Work orders":
 # ---------------------------------------------------------------- CONSOLE (free play)
 elif view == "Console":
     st.markdown("### Console")
-    st.caption("Free play. Any site, any workload, any plant. Nothing is locked and nothing is graded.")
+    st.caption("Free play. Any site, any workload, any plant. No targets and no rating: just try things and see what happens.")
     c = st.columns([1.2, 1.1, 1.9, 1.3])
     climate = c[0].selectbox("Site and weather", list(CLIMATES), format_func=lambda k: CLIMATES[k].label)
     workload = c[1].selectbox("Workload", list(WORKLOADS), format_func=lambda k: WORKLOADS[k].label)
