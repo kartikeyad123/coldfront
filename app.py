@@ -5,6 +5,8 @@ Interactive thermodynamics laboratory for AME 310 (Part D, refrigeration cycle).
 This file is the interface only: page layout, controls and the game flow.
 All thermodynamics lives in the coldfront/ package.      Run:  streamlit run app.py
 """
+import os
+import re
 
 from dataclasses import replace
 import numpy as np
@@ -51,6 +53,15 @@ ART = {
     "blackwell": f'<rect x="42" y="8" width="56" height="74" rx="3" {_L}/><path {_L} d="M50 22 h40 M50 36 h40 M50 50 h40 M50 64 h40"/>'
                  f'<path fill="none" stroke="#6FA8DC" stroke-width="1.8" stroke-linecap="round" d="M14 30 H42 M14 58 H42 M98 30 H126 M98 58 H126"/>',
 }
+BLURB = dict(
+    first_shift="A normal day. The servers are safe, but the plant is wasting power. Bring the PUE down.",
+    heatwave="A desert heatwave and a city water permit that covers only part of the day. Lose no compute.",
+    chiller_down="A chiller trips half an hour before a 4.5 MW training run. Get through the night.",
+    price_spike="Evening prices are about to triple. You have an empty storage tank and a cooling bill to hold.",
+    not_a_drop="A 43 °C day with a water permit of zero. Dry coolers only. Hold the PUE anyway.",
+    blackwell="Liquid-cooled GPU racks, and two chillers about to fail at the hottest hour.")
+_T = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests", "test_physics.py")).read()
+N_TESTS = _T.count("def test_") + sum(m.count(",") for m in re.findall(r"parametrize\([^\[]*\[([^\]]*)\]", _T))
 LOCK_NAMES = dict(rejection="heat rejection", rack_cooling="rack cooling", tank="tank installed", tank_MWh="tank size",
                   tank_rate_MW="tank rate", T_chws_C="water temperature", dT_chw="water temperature rise")
 VERDICT = {"A": "Excellent shift. Every target met, with room to spare.", "B": "Solid shift. Every target met.",
@@ -193,12 +204,13 @@ def scorecard(m, s):
     c[5].metric("Chiller COP", "off all day" if cop != cop else f"{cop:.1f}")
 
 
-def what_happened(day, prev=None):
+def what_happened(day, prev=None, focus="pue"):
     """Plain-language account of the run, built from the numbers."""
     m, x, s = day.metrics, day.series, day.settings
     out = []
     if m["minutes_over_limit"] > 0:
         k = int(np.argmax(x["shortfall"]))
+        short_now = float(np.max(x["shortfall"])) / 1e6
         out.append(f"<b>Cooling fell short.</b> At {int(x['hour'][k]):02d}:{int(x['hour'][k] % 1 * 60):02d} the plant was "
                    f"{x['shortfall'][k] / 1e6:.1f} MW short, the hall reached {m['T_inlet_max']:.1f} °C and the GPUs gave up "
                    f"{m['compute_lost_pct']:.1f} % of the day's compute.")
@@ -214,15 +226,34 @@ def what_happened(day, prev=None):
         out.append(f"Free cooling helped for the equivalent of {m['free_cooling_hours']:.1f} full hours.")
     share = 100 * m["E_comp_MWh"] / max(m["E_cool_MWh"], 1e-9)
     out.append(f"Cooling used {m['E_cool_MWh']:.1f} MWh, {share:.0f} % of it in the compressors; "
-               f"the tower took {m['water_m3']:,.0f} m³ of water." if s.rejection == "tower" else
+               f"the tower took {m['water_m3']:,.0f} m³ of water." if m["water_m3"] > 0.5 else
                f"Cooling used {m['E_cool_MWh']:.1f} MWh, {share:.0f} % of it in the compressors, and no water.")
-    if prev is not None and abs(prev["pue"] - m["pue"]) > 5e-4:
-        d = m["pue"] - prev["pue"]
-        why = ""
-        if prev["cop_mean"] == prev["cop_mean"] and m["cop_mean"] == m["cop_mean"]:
-            why = f" The chiller COP went from {prev['cop_mean']:.1f} to {m['cop_mean']:.1f}."
-        out.insert(0, f"<b>Compared with your last run</b>, the PUE {'rose' if d > 0 else 'fell'} by {abs(d):.3f} "
-                      f"({'worse' if d > 0 else 'better'}).{why}")
+    if prev is not None:
+        cmp = []
+        if focus == "cost_cooling" and abs(prev["cost_cooling"] - m["cost_cooling"]) >= 1:
+            d = m["cost_cooling"] - prev["cost_cooling"]
+            cmp.append(f"the cooling bill {'rose' if d > 0 else 'fell'} by ${abs(d):,.0f} ({'worse' if d > 0 else 'better'}).")
+        elif abs(prev["pue"] - m["pue"]) > 5e-4:
+            d = m["pue"] - prev["pue"]
+            cmp.append(f"the PUE {'rose' if d > 0 else 'fell'} by {abs(d):.3f} ({'worse' if d > 0 else 'better'}).")
+            pc, mc = prev["cop_mean"], m["cop_mean"]
+            if pc == pc and mc == mc:
+                cmp.append(f"The chiller COP went from {pc:.1f} to {mc:.1f}.")
+                dfc = m["free_cooling_hours"] - prev["free_cooling_hours"]
+                if d < 0 and mc <= pc + 0.05 and dfc > 0.5:
+                    cmp.append(f"The COP did not rise because free cooling took over the easy hours "
+                               f"({prev['free_cooling_hours']:.1f} to {m['free_cooling_hours']:.1f} h); the chillers now "
+                               "run only when the lift is largest.")
+        po, mo = prev["minutes_over_limit"], m["minutes_over_limit"]
+        if po > 0 or mo > 0:
+            ps, ms = prev.get("short_MW", 0.0), float(np.max(x["shortfall"])) / 1e6
+            if abs(po - mo) < 15 and abs(ps - ms) < 0.1 and mo > 0:
+                cmp.append("The cooling shortfall did not change: that setting adds no capacity when it is needed.")
+            else:
+                cmp.append(f"Time above the limit went from {po:.0f} to {mo:.0f} min and the worst shortfall from "
+                           f"{ps:.1f} to {ms:.1f} MW.")
+        if cmp:
+            out.insert(0, "<b>Compared with your last run</b>, " + cmp[0][0].lower() + cmp[0][1:] + " " + " ".join(cmp[1:]))
     return " ".join(out)
 
 
@@ -308,13 +339,12 @@ elif view == "Work orders":
             for colm, o in zip(cols, ORDERS[i:i + 3]):
                 with colm:
                     g = st.session_state["grades"].get(o.key)
-                    card(f'<div style="min-height:215px;position:relative">'
+                    card(f'<div style="min-height:150px;position:relative">'
                          f'<svg viewBox="0 0 140 90" width="124" style="position:absolute;top:-2px;right:-4px">{ART[o.key]}</svg>'
                          f'<div style="padding-right:128px;min-height:84px"><span class="cf-mono">WORK ORDER {o.number} · {o.client}</span><br>'
                          f'<span style="font-size:19px;font-weight:600">{o.title}</span>'
                          f'{"<br><span class=cf-badge style=margin-left:0>BEST SO FAR · " + g + "</span>" if g else ""}</div>'
-                         f'<span style="color:#B4BAC2">{o.brief}</span><br>'
-                         f'<span class="cf-mono">Idea: {o.teaches}</span></div>')
+                         f'<span style="color:#B4BAC2">{BLURB[o.key]}</span></div>')
                     st.button("Open", key="open" + o.key, width="stretch", on_click=go, args=("Work orders",),
                               kwargs=dict(wo_key=o.key))
     else:
@@ -323,10 +353,18 @@ elif view == "Work orders":
         sk = "wo_plans_" + key
         plans = st.session_state.setdefault(sk, [])
 
+        last = st.session_state.get("wo_last_" + key)        # the plans of the previous attempt
+        tries = st.session_state.setdefault("wo_try_" + key, 0)
+
         def new_numbers():
             st.session_state["wo_var_" + key] = (var + 1) % len(SETS)
             st.session_state.pop("wo_prev_" + key, None)
+            st.session_state.pop("wo_last_" + key, None)
             plans.clear()
+
+        def reset_plant():
+            st.session_state.pop("wo_last_" + key, None)
+            st.session_state["wo_try_" + key] = tries + 1
         top = st.columns([5, 1])
         top[0].markdown(f'<span class="cf-mono">WORK ORDER {o.number} · SET {SETS[var]} · {o.client} · {CLIMATES[o.climate].label} · '
                         f'{WORKLOADS[o.workload].label}</span>', unsafe_allow_html=True)
@@ -370,14 +408,19 @@ elif view == "Work orders":
                 card(targets_table(), "cf-card cf-targets")
             guide(2 if ("wo_prev_" + key) in st.session_state else 0)
             H("Set the plant for the start of the shift")
-            v = settings_toolbar(f"wo{key}{var}0", o.locks, o.start, o.limits)
+            v = settings_toolbar(f"wo{key}{var}t{tries}s0", o.locks, dict(o.start, **last[0]) if last else o.start, o.limits)
+            if last:
+                st.caption("These are the settings from your last attempt.")
             fixed = [LOCK_NAMES[k] for k in o.locks if k in LOCK_NAMES]
             if fixed:
                 st.caption("Fixed by this work order: " + ", ".join(fixed) + ".")
-            c = st.columns([1, 1, 4])
+            c = st.columns([1, 1, 1, 3])
             c[0].button("Start shift", type="primary", width="stretch", on_click=lambda: plans.append(v))
             c[1].button("New numbers", width="stretch", on_click=new_numbers, key="nn0",
                         help="Same problem with different numbers. There are three sets.")
+            if last:
+                c[2].button("Reset the plant", width="stretch", on_click=reset_plant,
+                            help="Put every setting back to where this work order starts.")
             with st.expander("Hint"):
                 st.write(o.hint)
             T.tour("brief", T.BRIEF, FORCE)
@@ -389,7 +432,12 @@ elif view == "Work orders":
                      f'<span style="font-size:18px;font-weight:600">{ev.title}</span><br>{ev.text}',
                      ("cf-alert" if ev.kind == "trip" else "cf-note") + " cf-event")
                 H("Change the plant, then resume")
-                v = settings_toolbar(f"wo{key}{var}{stage}", o.locks, plans[-1], o.limits)
+                dflt = dict(plans[-1])
+                if last and stage < len(last):               # repeat what you changed at this pause last time
+                    dflt.update({k: x for k, x in last[stage].items() if last[stage - 1].get(k) != x})
+                    if dflt != plans[-1]:
+                        st.caption("The change you made at this pause last time is already applied.")
+                v = settings_toolbar(f"wo{key}{var}t{tries}s{stage}", o.locks, dflt, o.limits)
                 c = st.columns([1, 1, 4])
                 c[0].button("Resume shift", type="primary", width="stretch", on_click=lambda: plans.append(v))
                 c[1].button("Restart", width="stretch", on_click=lambda: plans.clear())
@@ -413,16 +461,19 @@ elif view == "Work orders":
                     guide(1 if grade in "CD" else 3)
                     if grade in "CD":
                         guide(2)
-                card("<b>What happened.</b> " + what_happened(day, st.session_state.get("wo_prev_" + key)), "cf-card cf-what")
+                card("<b>What happened.</b> " + what_happened(day, st.session_state.get("wo_prev_" + key),
+                                                                 "cost_cooling" if any(t.metric == "cost_cooling" for t in o.targets) else "pue"), "cf-card cf-what")
                 if grade in "AB":
-                    card("<b>Why it worked.</b> " + o.lesson, "cf-note")
+                    card(f"<b>Why it worked.</b> {o.lesson}<br><span class='cf-mono'>The idea: {o.teaches}</span>", "cf-note")
                 else:
                     with st.expander("Hint"):
                         st.write(o.hint)
                 c = st.columns([1, 1, 1, 3])
 
                 def again():
-                    st.session_state["wo_prev_" + key] = day.metrics
+                    st.session_state["wo_prev_" + key] = dict(day.metrics, short_MW=float(np.max(day.series["shortfall"])) / 1e6)
+                    st.session_state["wo_last_" + key] = [dict(p) for p in plans]
+                    st.session_state["wo_try_" + key] = tries + 1
                     plans.clear()
                 c[0].button("Try again", type="primary" if grade in "CD" else "secondary", width="stretch", on_click=again)
                 nxt = ORDERS[(ORDERS.index(WORK_ORDERS[key]) + 1) % len(ORDERS)]
@@ -557,7 +608,7 @@ elif view == "Compare":
 else:
     st.markdown("### Proof")
     st.caption("Why the numbers can be trusted. Every check on this page is recomputed by the model, and the same "
-               "checks run as 21 automated tests.")
+               f"checks run as {N_TESTS} automated tests.")
     P = proof_data()
     H("1 · The cycle against a textbook")
     st.write("Çengel and Boles, Example 11-1: ideal R-134a cycle, 0.14 to 0.8 MPa, 0.05 kg/s.")

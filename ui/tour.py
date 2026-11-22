@@ -126,8 +126,9 @@ _JS = r"""
     root.style.display = "";
     set("sessionStorage","cfStep:"+KEY, String(i));
     const st = STEPS[i]; cur = target(st);
-    const isLast = i === STEPS.length - 1;
-    card.innerHTML = `<div class="n">${i+1} OF ${STEPS.length}</div><h4>${st.title}</h4><p>${st.text}</p>
+    const isLast = !STEPS.slice(i + 1).some(x => target(x));
+    const live = STEPS.map((x, k) => target(x) ? k : -1).filter(k => k >= 0);
+    card.innerHTML = `<div class="n">${live.indexOf(i)+1} OF ${live.length}</div><h4>${st.title}</h4><p>${st.text}</p>
       <div class="row"><button class="skip">Skip tour</button>${i>0?'<button class="back">Back</button>':''}
       <button class="next">${isLast ? (st.last || "Done") : "Next"}</button></div>`;
     card.querySelector(".skip").onclick = finish;
