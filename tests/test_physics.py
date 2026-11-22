@@ -144,3 +144,18 @@ def test_overloaded_plant_stays_finite():
         assert np.all(np.isfinite(day.series["T_inlet"]))
         s = day.settings if hasattr(day, "settings") and day.settings else PlantSettings(**bad)
         assert m.max() <= MAX_FLOW * s.Q_design / (4186.0 * 4.0) * 1.01
+
+
+def test_every_problem_set_has_an_A_and_needs_its_lever():
+    """All 18 problem sets: the reference solution earns an A, the passing play
+    passes, doing nothing does not pass, and warm water alone is not enough
+    where the problem is about another control."""
+    from coldfront import contracts as C
+    for key, sets in C.VARIANTS.items():
+        for o in sets:
+            grade = lambda steps: C.evaluate(o, C.run_order(o, C.plans_for(o, steps)).metrics)[0]
+            assert grade(o.solution) == "A", (key, o.client)
+            assert grade(o.passing) in "AB", (key, o.client)
+            assert grade(()) in "CD", (key, o.client)
+            if key in ("heatwave", "price_spike", "not_a_drop"):
+                assert grade((dict(T_chws_C=17.0),)) in "CD", (key, o.client)

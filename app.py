@@ -15,7 +15,7 @@ from coldfront.plant import PlantSettings, DEVICES, C2K
 from coldfront.day import simulate_day
 from coldfront.chiller import solve_cycle, REFRIGERANTS, ETA_PEAK
 from coldfront.scenarios import CLIMATES, WORKLOADS, TARIFFS
-from coldfront.contracts import ORDERS, WORK_ORDERS, run_order, evaluate
+from coldfront.contracts import ORDERS, WORK_ORDERS, SETS, get_order, run_order, evaluate
 from coldfront import checks
 from ui import charts
 from ui.theme import CSS, header
@@ -51,6 +51,8 @@ ART = {
     "blackwell": f'<rect x="42" y="8" width="56" height="74" rx="3" {_L}/><path {_L} d="M50 22 h40 M50 36 h40 M50 50 h40 M50 64 h40"/>'
                  f'<path fill="none" stroke="#6FA8DC" stroke-width="1.8" stroke-linecap="round" d="M14 30 H42 M14 58 H42 M98 30 H126 M98 58 H126"/>',
 }
+LOCK_NAMES = dict(rejection="heat rejection", rack_cooling="rack cooling", tank="tank installed", tank_MWh="tank size",
+                  tank_rate_MW="tank rate", T_chws_C="water temperature", dT_chw="water temperature rise")
 VERDICT = {"A": "Excellent shift. Every target met, with room to spare.", "B": "Solid shift. Every target met.",
            "C": "Safe, but wasteful. The efficiency target was missed.", "D": "A safety limit was crossed. Try another setup."}
 
@@ -79,8 +81,8 @@ def run_day(settings_items, climate, workload, tariff="retail"):
 
 
 @st.cache_data(show_spinner=False, max_entries=96)
-def run_wo(key, plans_items, until):
-    return run_order(WORK_ORDERS[key], [PlantSettings(**dict(p)) for p in plans_items], until)
+def run_wo(key, var, plans_items, until):
+    return run_order(get_order(key, var), [PlantSettings(**dict(p)) for p in plans_items], until)
 
 
 @st.cache_data(show_spinner=False, max_entries=32)
@@ -108,10 +110,11 @@ def P_iplv():
 
 
 # ---------------------------------------------------------------- shared pieces
-def settings_toolbar(prefix, locks=None, defaults=None):
+def settings_toolbar(prefix, locks=None, defaults=None, limits=None):
     """Four drop-down panels, one per part of the plant. Locked settings (set
     by a work order) are shown but cannot be changed."""
     locks = locks or {}
+    limits = limits or {}
     d = PlantSettings().__dict__.copy()
     d.update(defaults or {})
     d.update(locks)
@@ -122,10 +125,16 @@ def settings_toolbar(prefix, locks=None, defaults=None):
                                      format_func=lambda k: "Air: coils and fans, limit 27 °C inlet" if k == "air"
                                      else "Liquid: direct-to-chip, limit 40 °C coolant",
                                      key=prefix + "rc", disabled="rack_cooling" in locks)
-        hi = 20.0 if v["rack_cooling"] == "air" else 40.0
-        v["T_chws_C"] = st.slider("Water supply temperature [°C]", 6.0, hi, min(float(d["T_chws_C"]), hi), 0.5,
-                                  key=prefix + "chws" + v["rack_cooling"], format="%.1f")
-        v["dT_chw"] = st.slider("How much the water warms up in the hall [°C]", 4.0, 12.0, float(d["dT_chw"]), 0.5, key=prefix + "dt", format="%.1f")
+        lo, hi = limits.get("T_chws_C", (6.0, 20.0 if v["rack_cooling"] == "air" else 40.0))
+        if "T_chws_C" in locks:
+            st.markdown(f'<div class="cf-mono">Water supply temperature: fixed at {locks["T_chws_C"]:g} °C</div>', unsafe_allow_html=True)
+        else:
+            v["T_chws_C"] = st.slider("Water supply temperature [°C]", lo, hi, max(lo, min(float(d["T_chws_C"]), hi)), 0.5,
+                                      key=prefix + "chws" + v["rack_cooling"], format="%.1f")
+            if "T_chws_C" in limits:
+                st.caption(f"This client allows {lo:g} to {hi:g} °C.")
+        v["dT_chw"] = st.slider("How much the water warms up in the hall [°C]", 4.0, 12.0, float(d["dT_chw"]), 0.5,
+                                key=prefix + "dt", format="%.1f", disabled="dT_chw" in locks)
         st.caption("Warmer water is easier for the chillers to make, so they use less electricity. "
                    "The racks receive this water plus " + ("8 K." if v["rack_cooling"] == "air" else "4 K."))
     with c[1].popover("Chillers", width="stretch"):
@@ -278,7 +287,7 @@ if view == "Home":
         st.markdown('<div class="cf-mono">PUE = total power ÷ computer power. 1.00 would be perfect; lower is better.</div>', unsafe_allow_html=True)
         H("How it works")
         card("<b>1. Pick a shift.</b> Six work orders, from a quiet first day to a chiller failure at 1:30 a.m. "
-             "All are open.<br><b>2. Set the plant.</b> Water temperature, chillers, tower or dry cooler, storage.<br>"
+             "Each has three sets of numbers. All are open.<br><b>2. Set the plant.</b> Water temperature, chillers, tower or dry cooler, storage.<br>"
              "<b>3. Run the day.</b> It pauses when something happens so you can react.<br>"
              "<b>4. See how it went.</b> Each attempt earns a grade from A to D. Retry as often as you like; your best one is kept.<br>"
              "<b>Curious?</b> Click any equipment for its equations and live numbers, or open <b>Proof</b> to see how "
@@ -309,11 +318,17 @@ elif view == "Work orders":
                     st.button("Open", key="open" + o.key, width="stretch", on_click=go, args=("Work orders",),
                               kwargs=dict(wo_key=o.key))
     else:
-        o = WORK_ORDERS[key]
+        var = st.session_state.setdefault("wo_var_" + key, 0)
+        o = get_order(key, var)
         sk = "wo_plans_" + key
         plans = st.session_state.setdefault(sk, [])
+
+        def new_numbers():
+            st.session_state["wo_var_" + key] = (var + 1) % len(SETS)
+            st.session_state.pop("wo_prev_" + key, None)
+            plans.clear()
         top = st.columns([5, 1])
-        top[0].markdown(f'<span class="cf-mono">WORK ORDER {o.number} · {o.client} · {CLIMATES[o.climate].label} · '
+        top[0].markdown(f'<span class="cf-mono">WORK ORDER {o.number} · SET {SETS[var]} · {o.client} · {CLIMATES[o.climate].label} · '
                         f'{WORKLOADS[o.workload].label}</span>', unsafe_allow_html=True)
         top[0].markdown(f"### {o.title}")
         top[1].button("All work orders", width="stretch", on_click=go, args=("Work orders",), kwargs=dict(wo_key=None))
@@ -355,22 +370,26 @@ elif view == "Work orders":
                 card(targets_table(), "cf-card cf-targets")
             guide(2 if ("wo_prev_" + key) in st.session_state else 0)
             H("Set the plant for the start of the shift")
-            v = settings_toolbar(f"wo{key}0", o.locks, o.start)
-            if o.locks:
-                st.caption("Fixed by this work order: " + ", ".join(k.replace("_", " ") for k in o.locks if k != "tank_soc0") + ".")
-            st.button("Start shift", type="primary", on_click=lambda: plans.append(v))
+            v = settings_toolbar(f"wo{key}{var}0", o.locks, o.start, o.limits)
+            fixed = [LOCK_NAMES[k] for k in o.locks if k in LOCK_NAMES]
+            if fixed:
+                st.caption("Fixed by this work order: " + ", ".join(fixed) + ".")
+            c = st.columns([1, 1, 4])
+            c[0].button("Start shift", type="primary", width="stretch", on_click=lambda: plans.append(v))
+            c[1].button("New numbers", width="stretch", on_click=new_numbers, key="nn0",
+                        help="Same problem with different numbers. There are three sets.")
             with st.expander("Hint"):
                 st.write(o.hint)
             T.tour("brief", T.BRIEF, FORCE)
         else:
-            day = run_wo(key, tuple(freeze(p) for p in plans), until)
+            day = run_wo(key, var, tuple(freeze(p) for p in plans), until)
             if not finished:                             # ---- paused at an event
                 ev = [e for e in o.events if e.pause][stage - 1]
                 card(f'<span class="cf-mono">PAUSED AT {int(ev.t):02d}:{int(ev.t % 1 * 60):02d}</span><br>'
                      f'<span style="font-size:18px;font-weight:600">{ev.title}</span><br>{ev.text}',
                      ("cf-alert" if ev.kind == "trip" else "cf-note") + " cf-event")
                 H("Change the plant, then resume")
-                v = settings_toolbar(f"wo{key}{stage}", o.locks, plans[-1])
+                v = settings_toolbar(f"wo{key}{var}{stage}", o.locks, plans[-1], o.limits)
                 c = st.columns([1, 1, 4])
                 c[0].button("Resume shift", type="primary", width="stretch", on_click=lambda: plans.append(v))
                 c[1].button("Restart", width="stretch", on_click=lambda: plans.clear())
@@ -400,14 +419,16 @@ elif view == "Work orders":
                 else:
                     with st.expander("Hint"):
                         st.write(o.hint)
-                c = st.columns([1, 1, 4])
+                c = st.columns([1, 1, 1, 3])
 
                 def again():
                     st.session_state["wo_prev_" + key] = day.metrics
                     plans.clear()
                 c[0].button("Try again", type="primary" if grade in "CD" else "secondary", width="stretch", on_click=again)
-                nxt = ORDERS[(ORDERS.index(o) + 1) % len(ORDERS)]
-                c[1].button(f"Next: {nxt.title}", width="stretch", on_click=go, args=("Work orders",), kwargs=dict(wo_key=nxt.key))
+                nxt = ORDERS[(ORDERS.index(WORK_ORDERS[key]) + 1) % len(ORDERS)]
+                c[1].button("New numbers", width="stretch", on_click=new_numbers, key="nn1",
+                            help="Same problem with different numbers. There are three sets.")
+                c[2].button(f"Next: {nxt.title}", width="stretch", on_click=go, args=("Work orders",), kwargs=dict(wo_key=nxt.key))
                 day_dashboard(day, "wo" + key)
                 T.tour("result", T.RESULT, FORCE)
 
