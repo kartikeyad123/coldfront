@@ -18,14 +18,16 @@ ROW = '[data-testid="stHorizontalBlock"]'
 HOME = [
     dict(css=".cf-hero", title="Welcome to COLDFRONT",
          text="You run the cooling plant of an AI data center for one day. This 30-second tour shows you where everything is."),
+    dict(css=".cf-flow", title="Four steps, always the same",
+         text="Choose a scenario, set the plant, run the day, explore what happened. Every page follows this order."),
     dict(css="iframe", title="This is the plant",
          text="Chillers in the middle, the cooling tower on the left, the servers on the right. It is playing a real simulated day. Blue means cold, yellow means warm."),
     dict(button="Start first shift", title="Start here",
          text="Your first mission is guided. It takes two minutes and teaches the one idea behind everything else."),
     dict(button="Open the console", title="Or just explore",
          text="The console is free play. Pick any city and any plant and just experiment. There are no targets to hit."),
-    dict(css='[data-testid="stButtonGroup"], [role="radiogroup"]', title="Six views",
-         text="Work orders are the missions. Chiller lab is one refrigeration cycle on its own. Compare runs two plans side by side. Proof shows how the model was checked. Now press Start first shift.", last="Got it"),
+    dict(css='[data-testid="stButtonGroup"], [role="radiogroup"]', title="Seven views",
+         text="Work orders are the missions. Console is free play. Chiller lab is one refrigeration cycle. Compare runs two plans side by side. Proof shows how the model was checked. Build a chiller is a three-minute game for beginners. Every page has its own tour: press Take the tour.", last="Got it"),
 ]
 
 BRIEF = [
@@ -63,6 +65,64 @@ PAUSE = [
          text="Resume runs the rest of the day with your new settings. Or resume without changes to see what happens. Restart takes you back to the briefing.", last="Got it"),
 ]
 
+LIST = [
+    dict(css=".cf-wocard", title="Six missions",
+         text="Each card is one shift at a client's site, with its own problem to solve. They are in the recommended order, but all are open."),
+    dict(button="Open", title="Open one",
+         text="Open a card to read the job and its targets. Each mission has three sets of numbers.", last="Got it"),
+]
+
+CONSOLE = [
+    dict(css=".st-key-cf_step1", title="1 · Choose the scenario",
+         text="Pick the city and its weather, what the servers are doing, and how electricity is priced. This is the situation the plant has to cope with."),
+    dict(css=".st-key-cf_step2", title="2 · Set the plant",
+         text="Four controls, one per part of the plant. Open one, change a setting, click outside to close it. The day reruns at once."),
+    dict(css="iframe", title="3 · Watch the day run",
+         text="Press Play day. Colours show each machine's state: blue normal, purple high demand, orange inefficient, red critical, grey offline. Click any machine or pipe for its numbers."),
+    dict(css=".cf-fxnote", title="What your change did",
+         text="After every change, a strip above the drawing names what you changed and which equipment felt it, with the numbers. Those machines glow for a few seconds."),
+    dict(css=".cf-what", title="4 · Explore the results",
+         text="This paragraph explains the day in plain words. Below it are the day's numbers and charts."),
+    dict(css=".st-key-cf_ask", title="Ask the plant",
+         text="Type a question in your own words, such as 'why is the PUE high' or 'what does the tower do'. It answers from this run's numbers.", last="Got it"),
+]
+
+LAB = [
+    dict(css=".st-key-cf_labctl", title="One refrigeration cycle",
+         text="This page is the chiller on its own. Set the two temperatures, the refrigerant and the compressor efficiency here."),
+    dict(css="iframe", title="Watch the refrigerant",
+         text="Solid blobs are liquid, hollow ones are vapor. Blue is cold, yellow is hot. Each corner shows temperature, pressure and phase. Click a component for its numbers."),
+    dict(css=".js-plotly-plot", title="The same cycle on property diagrams",
+         text="Pressure against enthalpy and temperature against entropy, drawn on the refrigerant's saturation dome."),
+    dict(css=".cf-chal", title="Three small challenges",
+         text="Each one can be met by moving the sliders above. They turn green when met.", last="Got it"),
+]
+
+COMPARE = [
+    dict(css=".st-key-cf_step1", title="Same day for both",
+         text="Choose one site, workload and price. Both plans face exactly the same day."),
+    dict(css=".st-key-cf_planA", title="Plan A and Plan B",
+         text="Set each plant with the same four controls. Change one thing in Plan B to see what that one thing does."),
+    dict(css=".cf-fxcard", title="What the difference did",
+         text="This chain reads from cause to effect: what differs between the plans, which equipment it touched, and the result."),
+    dict(css=".cf-cmp", title="Every number side by side",
+         text="The last column is B minus A.", last="Got it"),
+]
+
+PROOF = [
+    dict(css=".cf-proofintro", title="Why trust the numbers",
+         text="Every check on this page is recomputed live by the model. Nothing here is typed in by hand."),
+    dict(css=".cf-p1", title="Against a textbook",
+         text="The cycle is compared with a worked example from Çengel and Boles."),
+    dict(css=".cf-note", title="One check fails, on purpose visible",
+         text="The model overstates the saving from warmer water compared with a rule of thumb. It is shown, with what it means.", last="Got it"),
+]
+
+KIDS = [
+    dict(css="iframe", title="Build a chiller",
+         text="Drag each part to where it belongs in the loop. If one is wrong it bounces back with a clue. No reading needed.", last="Got it"),
+]
+
 _JS = r"""
 <script>
 (function(){
@@ -79,7 +139,7 @@ _JS = r"""
 
   function target(st){
     let el = null;
-    if (st.button) { el = Array.from(D.querySelectorAll("button")).find(b => { const t = b.innerText.trim(); return (t === st.button || t.split("\n")[0].trim() === st.button || t.startsWith(st.button)) && b.offsetParent !== null; }); }
+    if (st.button) { el = Array.from(D.querySelectorAll("button")).find(b => { const t = b.innerText.trim(); return (t === st.button || t.startsWith(st.button) || t.split("\n").some(l => l.trim() === st.button)) && b.offsetParent !== null; }); }
     else if (st.css) { el = Array.from(D.querySelectorAll(st.css)).find(e => e.offsetParent !== null && e.getBoundingClientRect().height > 8); }
     if (el && st.closest) el = el.closest(st.closest) || el;
     return el;
@@ -98,6 +158,7 @@ _JS = r"""
     #cf-tour button.skip{border-color:transparent;color:#8A929C;padding-left:0}
     #cf-tour button:hover{border-color:#E6E8EB}
   </style><div class="hole"></div><div class="card" role="dialog" aria-live="polite"></div>`;
+  root.style.display = "none";            // nothing is covered until the first step is ready
   D.body.appendChild(root);
   const hole = root.querySelector(".hole"), card = root.querySelector(".card");
   let i = parseInt(get("sessionStorage","cfStep:"+KEY) || "0", 10) || 0, timer = null, cur = null;
@@ -141,7 +202,7 @@ _JS = r"""
     if (e.key === "Escape") finish(); if (e.key === "ArrowRight" || e.key === "Enter") { const n = card.querySelector(".next"); if (n) n.click(); } });
   // the page may still be rendering: wait for the first target, then keep the highlight glued to it
   let tries = 0;
-  const wait = P.setInterval(()=>{ if (target(STEPS[Math.min(i, STEPS.length-1)]) || ++tries > 40) { P.clearInterval(wait); show(1); timer = P.setInterval(place, 200); } }, 150);
+  const wait = P.setInterval(()=>{ if (target(STEPS[Math.min(i, STEPS.length-1)]) || ++tries > 240) { P.clearInterval(wait); show(1); timer = P.setInterval(place, 200); } }, 150);
 })();
 </script>
 """

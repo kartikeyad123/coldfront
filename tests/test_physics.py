@@ -159,3 +159,28 @@ def test_every_problem_set_has_an_A_and_needs_its_lever():
             assert grade(()) in "CD", (key, o.client)
             if key in ("heatwave", "price_spike", "not_a_drop"):
                 assert grade((dict(T_chws_C=17.0),)) in "CD", (key, o.client)
+
+
+def test_ask_the_plant_understands_rephrasings():
+    """Ask the plant is keyword matching, not AI. It must still land on the
+    right topic for at least 95 % of 140 differently worded questions, and
+    every answer must render on very different days."""
+    from tests.ask_cases import CASES
+    from ui import ask
+    from coldfront.day import simulate_day
+    from coldfront.plant import PlantSettings
+    total = right = 0
+    for topic, questions in CASES.items():
+        for q in questions:
+            r, _ = ask.rank(q)
+            top = r[1][1] if (r[0][1] == "improve" and r[1][0] >= 3) else r[0][1]
+            total += 1
+            right += top == topic and r[0][0] >= 2
+    assert right / total >= 0.95, (right, total)
+    assert ask.answer("asdf qwerty", None)["text"] is None          # nonsense is not answered
+    for d in (simulate_day(PlantSettings(), "la_hot", "inference"),
+              simulate_day(PlantSettings(n_chillers=1, rejection="dry", tank=True), "phoenix", "training"),
+              simulate_day(PlantSettings(rack_cooling="liquid", T_chws_C=30.0), "phoenix", "inference")):
+        S = ask.stats(d)
+        for key, (_, fn, _) in ask.TOPICS.items():
+            assert "nan" not in fn(d, S, set()), key

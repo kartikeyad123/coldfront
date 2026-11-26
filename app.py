@@ -20,15 +20,17 @@ from coldfront.scenarios import CLIMATES, WORKLOADS, TARIFFS
 from coldfront.contracts import ORDERS, WORK_ORDERS, SETS, get_order, run_order, evaluate
 from coldfront import checks
 from ui import charts
-from ui.theme import CSS, header
+from ui.theme import CSS, header, flow, step
 from ui.plant_view import plant_html
 from ui.cycle_view import cycle_html
+from ui.kids_view import kids_html
 from ui import tour as T
+from ui import explain, ask
 
 st.set_page_config(page_title="COLDFRONT", page_icon="❄", layout="wide", initial_sidebar_state="collapsed")
 st.markdown(CSS, unsafe_allow_html=True)
 
-VIEWS = ["Home", "Work orders", "Console", "Chiller lab", "Compare", "Proof"]
+VIEWS = ["Home", "Work orders", "Console", "Chiller lab", "Compare", "Proof", "Build a chiller"]
 GWP = {"R134a": "GWP 1430", "R1234ze(E)": "GWP 1", "R717": "GWP 0", "R290": "GWP 3"}
 PRESETS = {
     "As built": dict(),
@@ -37,7 +39,7 @@ PRESETS = {
     "Dry (no water)": dict(rejection="dry", T_chws_C=16.0, dT_chw=8.0),
     "Liquid-cooled GPU hall": dict(rack_cooling="liquid", T_chws_C=30.0, dT_chw=8.0),
 }
-PLANT_H = 930
+PLANT_H = 1130      # first guess only: the drawing resizes its own frame to fit
 
 # Small line drawings for the work-order cards (decoration only)
 _L = 'fill="none" stroke="#5E6670" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"'
@@ -73,8 +75,8 @@ def go(view, **kw):
     st.session_state.update(kw)
 
 
-def H(text):
-    st.markdown(f'<div class="cf-h">{text}</div>', unsafe_allow_html=True)
+def H(text, cls=""):
+    st.markdown(f'<div class="cf-h {cls}">{text}</div>', unsafe_allow_html=True)
 
 
 def card(html, cls="cf-card"):
@@ -115,13 +117,28 @@ def proof_data():
                 ts=checks.timestep_study(), we=checks.worked_example(), ahri=checks.ahri_rating()["kw_per_ton"])
 
 
+@st.cache_data(show_spinner="Solving fifteen days for the game…")
+def kids_data():
+    """Numbers for the beginners' game, all from the model."""
+    import CoolProp.CoolProp as CP
+    cyc = solve_cycle("R134a", 8.0 + C2K, 35.0 + C2K, 0.80, 5.0, 3.0)
+    x4 = float(CP.PropsSI("Q", "P", cyc.P_evap, "H", cyc.h[3], "R134a"))
+    Pk = [cyc.P_evap, cyc.P_cond, cyc.P_cond, cyc.P_evap]
+    cycle = dict(T=[round(t - C2K) for t in cyc.T], P=[round(p / 1e3) for p in Pk], x4=round(x4, 2))
+    table = []
+    for T_w in range(6, 21):
+        m = simulate_day(PlantSettings(T_chws_C=float(T_w)), "la_hot", "inference").metrics
+        table.append(dict(T=T_w, peak=round(m["T_inlet_max"], 1), bill=round(m["cost_cooling"]), pue=round(m["pue"], 3)))
+    return cycle, table
+
+
 @st.cache_data(show_spinner=False)
 def P_iplv():
     return checks.iplv()["iplv"]
 
 
 # ---------------------------------------------------------------- shared pieces
-def settings_toolbar(prefix, locks=None, defaults=None, limits=None):
+def settings_toolbar(prefix, locks=None, defaults=None, limits=None, vertical=False):
     """Four drop-down panels, one per part of the plant. Locked settings (set
     by a work order) are shown but cannot be changed."""
     locks = locks or {}
@@ -130,8 +147,8 @@ def settings_toolbar(prefix, locks=None, defaults=None, limits=None):
     d.update(defaults or {})
     d.update(locks)
     v = dict(defaults or {})
-    c = st.columns(4)
-    with c[0].popover("Chilled water", width="stretch"):
+    c = [st.container() for _ in range(4)] if vertical else st.columns(4)
+    with c[0].popover("Chilled water", width="stretch", icon=":material/water_drop:"):
         v["rack_cooling"] = st.radio("Cooling at the racks", ["air", "liquid"], ["air", "liquid"].index(d["rack_cooling"]),
                                      format_func=lambda k: "Air: coils and fans, limit 27 °C inlet" if k == "air"
                                      else "Liquid: direct-to-chip, limit 40 °C coolant",
@@ -148,7 +165,7 @@ def settings_toolbar(prefix, locks=None, defaults=None, limits=None):
                                 key=prefix + "dt", format="%.1f", disabled="dT_chw" in locks)
         st.caption("Warmer water is easier for the chillers to make, so they use less electricity. "
                    "The racks receive this water plus " + ("8 K." if v["rack_cooling"] == "air" else "4 K."))
-    with c[1].popover("Chillers", width="stretch"):
+    with c[1].popover("Chillers", width="stretch", icon=":material/ac_unit:"):
         v["n_chillers"] = st.slider("Chillers available", 1, 4, int(d["n_chillers"]), key=prefix + "n",
                                     disabled="n_chillers" in locks)
         v["fluid"] = st.selectbox("Refrigerant", list(REFRIGERANTS), list(REFRIGERANTS).index(d["fluid"]),
@@ -156,13 +173,13 @@ def settings_toolbar(prefix, locks=None, defaults=None, limits=None):
         v["eta_rated"] = st.slider("Compressor peak isentropic efficiency", 0.60, 0.90, float(d["eta_rated"]), 0.01,
                                    key=prefix + "eta")
         st.caption(f"Default {ETA_PEAK:.2f} is calibrated to ASHRAE 90.1 chiller ratings.")
-    with c[2].popover("Heat rejection", width="stretch"):
+    with c[2].popover("Heat rejection", width="stretch", icon=":material/mode_fan:"):
         v["rejection"] = st.radio("Equipment", ["tower", "dry"], ["tower", "dry"].index(d["rejection"]),
                                   format_func=lambda k: "Cooling tower (uses water)" if k == "tower" else "Dry cooler (no water)",
                                   key=prefix + "rej", disabled="rejection" in locks)
         v["free_cooling"] = st.toggle("Free cooling", bool(d["free_cooling"]), key=prefix + "fc")
         st.caption("Free cooling lets cold tower water pre-cool the return water, with no compressor.")
-    with c[3].popover("Storage tank", width="stretch"):
+    with c[3].popover("Storage tank", width="stretch", icon=":material/propane_tank:"):
         v["tank"] = st.toggle("Chilled-water storage tank", bool(d["tank"]), key=prefix + "tk", disabled="tank" in locks)
         off = not v["tank"]
         v["tank_MWh"] = st.slider("Capacity [MWh of cooling]", 5.0, 60.0, float(d["tank_MWh"]), 5.0, key=prefix + "tkc",
@@ -185,7 +202,7 @@ def settings_toolbar(prefix, locks=None, defaults=None, limits=None):
              item(("cooling tower" if v["rejection"] == "tower" else "dry cooler") + (", free cooling on" if v["free_cooling"] else ", free cooling off"), ("rejection", "free_cooling")),
              item(f"tank {v['tank_MWh']:g} MWh" if v["tank"] else "no tank", ("tank", "tank_MWh", "tank_rate_MW", "price_charge", "price_discharge")),
              item("liquid-cooled racks" if v["rack_cooling"] == "liquid" else "air-cooled racks", ("rack_cooling",))]
-    st.markdown('<div class="cf-set"><span style="color:#8A929C">Set now:</span> ' + " · ".join(parts) + '</div>'
+    st.markdown('<div class="cf-set"><span style="color:#A3ABB5">Set now:</span> ' + (" <br>" if vertical else " · ").join(parts) + '</div>'
                 '<div class="cf-mono" style="margin:2px 0 8px 0">These four buttons are your controls. Open one, change it, '
                 'then click anywhere outside to close it.</div>', unsafe_allow_html=True)
     return v
@@ -257,10 +274,45 @@ def what_happened(day, prev=None, focus="pue"):
     return " ".join(out)
 
 
-def day_dashboard(day, key, anim=None, start="hot"):
-    st.caption("Press Play day or drag the slider to move through the day. Click any equipment in the drawing "
-               "(a chiller, the tower, the data hall) to see inside it.")
-    st.iframe(plant_html(day, start=start), height=PLANT_H)
+def ask_box(day, key):
+    """Ask the plant: a question in the visitor's own words, answered from this run."""
+    with st.container(key="cf_ask"):
+        _ask_box(day, key)
+
+
+def _ask_box(day, key):
+    H("Ask the plant")
+    qk = key + "askq"
+
+    def put(text):
+        st.session_state[qk] = text
+    st.text_input("Ask the plant", key=qk, label_visibility="collapsed",
+                  placeholder="Ask in your own words: why is the PUE high?   what does the tower do?   what should I change?")
+    q = (st.session_state.get(qk) or "").strip()
+    if not q:
+        st.caption("Or try one of these. This is not an AI: it matches your question to a topic and answers from this run's numbers.")
+        cols = st.columns(len(ask.SUGGEST))
+        for colm, k in zip(cols, ask.SUGGEST):
+            colm.button(ask.TOPICS[k][0], key=f"{key}sg{k}", width="stretch", on_click=put, args=(ask.TOPICS[k][0],))
+        return
+    r = ask.answer(q, day)
+    if r["text"]:
+        card(r["text"], "cf-ask")
+    else:
+        card("I could not match that to anything I know about this plant. Try one of these:", "cf-ask")
+    if r["alternatives"] and not (r["text"] and r["sure"]):
+        st.caption("Did you mean:" if r["text"] else "Closest topics:")
+        cols = st.columns(3)
+        for colm, k in zip(cols, r["alternatives"][:3]):
+            colm.button(ask.TOPICS[k][0], key=f"{key}alt{k}", width="stretch", on_click=put, args=(ask.TOPICS[k][0],))
+
+
+def day_dashboard(day, key, anim=None, start="hot", fx=None, plant=True):
+    if plant:
+        st.caption("Press Play day or drag the slider. Click any equipment or pipe in the drawing to see inside it. "
+                   "Colours show each machine's state.")
+        st.iframe(plant_html(day, start=start, fx=fx), height=PLANT_H)
+    ask_box(day, key)
     H("The day in numbers")
     scorecard(day.metrics, day.settings)
     a, b = st.columns(2)
@@ -284,12 +336,17 @@ def day_dashboard(day, key, anim=None, start="hot"):
 st.session_state.setdefault("view", "Home")
 st.session_state.setdefault("grades", {})
 st.markdown(header("Run the cooling plant of an AI data center"), unsafe_allow_html=True)
+CTX = lambda c, w, t: (CLIMATES[c].label, WORKLOADS[w].label, TARIFFS[t].label)
 _nav = st.columns([6, 1])
 with _nav[0]:
     view = st.segmented_control("View", VIEWS, key="view", label_visibility="collapsed") or "Home"
-_nav[1].button("Take the tour", width="stretch",
-               on_click=lambda: st.session_state.update(tour_force=st.session_state.get("tour_force", 0) + 1))
-FORCE = st.session_state.get("tour_force")
+def _replay_tour():                      # replay the tour of the page the visitor is on, and only that one
+    st.session_state["tour_force"] = (st.session_state.get("view") or "Home", st.session_state.get("tour_force", ("", 0))[1] + 1)
+
+
+_nav[1].button("Take the tour", width="stretch", on_click=_replay_tour, icon=":material/explore:")
+_tf = st.session_state.get("tour_force", ("", 0))
+FORCE = _tf[1] if _tf[0] == view else None
 
 # ---------------------------------------------------------------- HOME
 if view == "Home":
@@ -299,33 +356,40 @@ if view == "Home":
         st.markdown('<div class="cf-lede">Eight megawatts of GPUs turn electricity into heat. Your job is to get that '
                     'heat outdoors for a day, using as little power and water as you can, without letting the servers '
                     'overheat. Every number comes from a real refrigeration-cycle model.</div>', unsafe_allow_html=True)
-        st.write("")
-        b = st.columns(3)
+        card("<b>What this is.</b> A working model of a data-center cooling plant that you can operate, break and fix.<br>"
+             "<b>What you will learn.</b> How a chiller moves heat, why a smaller temperature lift saves energy, when outside "
+             "air can cool for free, and what water, storage and liquid cooling each buy you.", "cf-learn")
+        b = st.columns(2)
         b[0].button("Start first shift", type="primary", width="stretch", on_click=go, args=("Work orders",),
-                    kwargs=dict(wo_key="first_shift"))
-        b[1].button("Open the console", width="stretch", on_click=go, args=("Console",))
-        b[2].button("Compare two plans", width="stretch", on_click=go, args=("Compare",))
-        H("What the model found")
-        air = run_day(freeze({}), "phoenix", "inference").metrics
-        liq = run_day(freeze(PRESETS["Liquid-cooled GPU hall"]), "phoenix", "inference").metrics
-        fact = lambda big, small: (f'<div class="cf-card" style="padding:12px 14px"><div class="cf-num" style="font-size:21px">{big}</div>'
-                                   f'<div style="color:#8A929C;font-size:12.5px;margin-top:4px">{small}</div></div>')
-        m = st.columns(3)
-        m[0].markdown(fact(f"{air['pue']:.2f} → {liq['pue']:.2f}", "PUE in Phoenix on a 43 °C day, with warm-water liquid cooling"), unsafe_allow_html=True)
-        m[1].markdown(fact(f"{air['E_comp_MWh']:.0f} → {liq['E_comp_MWh']:.0f} MWh", "chiller electricity per day: with warm water the chillers switch off"), unsafe_allow_html=True)
-        lost = run_day(freeze(dict(n_chillers=3)), "la_typical", "training").metrics["compute_lost_pct"]
-        m[2].markdown(fact(f"{lost:.1f} % lost", "of a day's computing when one chiller fails during a night training run"), unsafe_allow_html=True)
-        st.markdown('<div class="cf-mono">PUE = total power ÷ computer power. 1.00 would be perfect; lower is better.</div>', unsafe_allow_html=True)
-        H("How it works")
-        card("<b>1. Pick a shift.</b> Six work orders, from a quiet first day to a chiller failure at 1:30 a.m. "
-             "Each has three sets of numbers. All are open.<br><b>2. Set the plant.</b> Water temperature, chillers, tower or dry cooler, storage.<br>"
-             "<b>3. Run the day.</b> It pauses when something happens so you can react.<br>"
-             "<b>4. See how it went.</b> Each attempt earns a grade from A to D. Retry as often as you like; your best one is kept.<br>"
-             "<b>Curious?</b> Click any equipment for its equations and live numbers, or open <b>Proof</b> to see how "
-             "the model was checked.")
+                    kwargs=dict(wo_key="first_shift"), icon=":material/play_arrow:")
+        b[1].button("New to this? Build a chiller", width="stretch", on_click=go, args=("Build a chiller",), icon=":material/extension:",
+                    help="A three-minute game with no engineering needed.")
+        b = st.columns(2)
+        b[0].button("Open the console", width="stretch", on_click=go, args=("Console",), icon=":material/tune:")
+        b[1].button("Compare two plans", width="stretch", on_click=go, args=("Compare",), icon=":material/compare_arrows:")
     with R:
-        st.iframe(plant_html(run_day(freeze({}), "la_hot", "inference"), autoplay=True, start="zero", compact=True), height=380)
-        st.caption("A hot day in Los Angeles, as built: four chillers, a cooling tower, air-cooled racks.")
+        st.iframe(plant_html(run_day(freeze({}), "la_hot", "inference"), autoplay=True, start="zero", compact=True), height=430)
+        st.caption("A hot day in Los Angeles, as built: four chillers, a cooling tower, air-cooled racks. Colours show each machine's state.")
+    H("How every page works")
+    st.markdown(flow(), unsafe_allow_html=True)
+    H("What the model found")
+    air = run_day(freeze({}), "phoenix", "inference").metrics
+    liq = run_day(freeze(PRESETS["Liquid-cooled GPU hall"]), "phoenix", "inference").metrics
+    fact = lambda big, small: (f'<div class="cf-card" style="padding:14px 16px"><div class="cf-num" style="font-size:24px">{big}</div>'
+                               f'<div class="cf-fact">{small}</div></div>')
+    m = st.columns(3)
+    m[0].markdown(fact(f"{air['pue']:.2f} → {liq['pue']:.2f}", "PUE in Phoenix on a 43 °C day, with warm-water liquid cooling"), unsafe_allow_html=True)
+    m[1].markdown(fact(f"{air['E_comp_MWh']:.0f} → {liq['E_comp_MWh']:.0f} MWh", "chiller electricity per day: with warm water the chillers switch off"), unsafe_allow_html=True)
+    lost = run_day(freeze(dict(n_chillers=3)), "la_typical", "training").metrics["compute_lost_pct"]
+    m[2].markdown(fact(f"{lost:.1f} % lost", "of a day's computing when one chiller fails during a night training run"), unsafe_allow_html=True)
+    st.markdown('<div class="cf-mono">PUE = total power ÷ computer power. 1.00 would be perfect; lower is better.</div>', unsafe_allow_html=True)
+    H("Where to go")
+    card("<b>Work orders</b> are six missions with targets and a grade; the shift pauses when something happens so you can react.<br>"
+         "<b>Console</b> is free play, and has <b>Ask the plant</b>: type a question in your own words.<br>"
+         "<b>Chiller lab</b> is one refrigeration cycle on its own. <b>Compare</b> runs two plans side by side. "
+         "<b>Proof</b> shows how the model was checked.<br>"
+         "<b>Build a chiller</b> is a three-minute game for anyone, no engineering needed.<br>"
+         "Every page has its own guided tour: press <b>Take the tour</b> at the top right.")
     T.tour("home", T.HOME, FORCE)
 
 # ---------------------------------------------------------------- WORK ORDERS
@@ -339,7 +403,7 @@ elif view == "Work orders":
             for colm, o in zip(cols, ORDERS[i:i + 3]):
                 with colm:
                     g = st.session_state["grades"].get(o.key)
-                    card(f'<div style="min-height:150px;position:relative">'
+                    card(f'<div style="min-height:150px;position:relative" class="cf-wocard">'
                          f'<svg viewBox="0 0 140 90" width="124" style="position:absolute;top:-2px;right:-4px">{ART[o.key]}</svg>'
                          f'<div style="padding-right:128px;min-height:84px"><span class="cf-mono">WORK ORDER {o.number} · {o.client}</span><br>'
                          f'<span style="font-size:19px;font-weight:600">{o.title}</span>'
@@ -347,6 +411,7 @@ elif view == "Work orders":
                          f'<span style="color:#B4BAC2">{BLURB[o.key]}</span></div>')
                     st.button("Open", key="open" + o.key, width="stretch", on_click=go, args=("Work orders",),
                               kwargs=dict(wo_key=o.key))
+        T.tour("list", T.LIST, FORCE)
     else:
         var = st.session_state.setdefault("wo_var_" + key, 0)
         o = get_order(key, var)
@@ -480,27 +545,54 @@ elif view == "Work orders":
                 c[1].button("New numbers", width="stretch", on_click=new_numbers, key="nn1",
                             help="Same problem with different numbers. There are three sets.")
                 c[2].button(f"Next: {nxt.title}", width="stretch", on_click=go, args=("Work orders",), kwargs=dict(wo_key=nxt.key))
-                day_dashboard(day, "wo" + key)
+                fx = None
+                if last and len(last) == len(plans):            # what changed since the previous attempt, and what it did
+                    when = ["at the start"] + [f"at {int(t):02d}:{int(t % 1 * 60):02d}" for t in pauses]
+                    fx = explain.effects(run_wo(key, var, tuple(freeze(p) for p in last), 24.0), day, labels="Since your last attempt: ",
+                                         stages=[(when[k], last[k], plans[k]) for k in range(len(plans))])
+                day_dashboard(day, "wo" + key, fx=fx)
                 T.tour("result", T.RESULT, FORCE)
 
 # ---------------------------------------------------------------- CONSOLE (free play)
 elif view == "Console":
     st.markdown("### Console")
-    st.caption("Free play. Any site, any workload, any plant. No targets and no rating: just try things and see what happens.")
-    c = st.columns([1.2, 1.1, 1.9, 1.3])
-    climate = c[0].selectbox("Site and weather", list(CLIMATES), format_func=lambda k: CLIMATES[k].label)
-    workload = c[1].selectbox("Workload", list(WORKLOADS), format_func=lambda k: WORKLOADS[k].label)
-    tariff = c[2].selectbox("Electricity price", list(TARIFFS), format_func=lambda k: TARIFFS[k].label)
-    preset = c[3].selectbox("Start from", list(PRESETS))
-    v = settings_toolbar("con" + preset, defaults=PRESETS[preset])
+    st.caption("Free play. Any site, any workload, any plant. No targets and no rating: just try things and see what happens. "
+               "Work down the numbered steps.")
+    left, right = st.columns([1, 3.2], gap="medium")
+    with left:
+        with st.container(key="cf_step1"):
+            st.markdown(step(1, "Choose the scenario", "The situation the plant has to cope with."), unsafe_allow_html=True)
+            climate = st.selectbox(":material/location_on: Site and weather", list(CLIMATES), format_func=lambda k: CLIMATES[k].label)
+            workload = st.selectbox(":material/memory: Workload (heat from the servers)", list(WORKLOADS), format_func=lambda k: WORKLOADS[k].label)
+            tariff = st.selectbox(":material/payments: Electricity price", list(TARIFFS), format_func=lambda k: TARIFFS[k].label)
+        with st.container(key="cf_step2"):
+            st.markdown(step(2, "Set the plant", "Pick a starting point, then open a control and change it."), unsafe_allow_html=True)
+            preset = st.selectbox(":material/tune: Start from", list(PRESETS))
+            v = settings_toolbar("con" + preset, defaults=PRESETS[preset], vertical=True)
     day = run_day(freeze(v), climate, workload, tariff)
     st.session_state["last_day"] = day
-    prev = st.session_state.get("con_prev")
-    card("<b>What happened.</b> " + what_happened(day, prev if prev is not day.metrics else None))
-    st.session_state["con_prev"] = day.metrics
+    cur = (freeze(v), climate, workload, tariff)                 # remember the run before the latest change
+    if st.session_state.get("con_cur") not in (None, cur):
+        st.session_state["con_base"] = st.session_state["con_cur"]
+    st.session_state["con_cur"] = cur
+    base = st.session_state.get("con_base")
+    fx = prev = None
+    if base and base != cur:
+        bday = run_day(*base)
+        prev = bday.metrics
+        fx = explain.effects(bday, day, CTX(*base[1:]), CTX(*cur[1:]))
+    with right:
+        st.markdown(step(3, "Watch the day run", "The model has solved all 24 hours. Press Play day, then click any machine or pipe."), unsafe_allow_html=True)
+        card("Change anything on the left and a strip appears above the drawing: it names what you changed, which equipment felt it "
+             "and by how much. Those machines glow for a few seconds." if fx is None else
+             "The strip above the drawing shows what your last change did. Hover a box to light up that machine.", "cf-mono cf-fxnote")
+        st.iframe(plant_html(day, fx=fx), height=PLANT_H)
+    st.markdown(step(4, "Explore the results", "In plain words first, then the numbers."), unsafe_allow_html=True)
+    card("<b>What happened.</b> " + what_happened(day, prev), "cf-card cf-what")
     for w in ([f"Servers above the limit for {day.metrics['minutes_over_limit']:.0f} minutes."] if day.metrics["minutes_over_limit"] > 0 else []):
         card(w, "cf-alert")
-    day_dashboard(day, "con", anim=(freeze(v), climate, workload, tariff))
+    day_dashboard(day, "con", anim=(freeze(v), climate, workload, tariff), plant=False)
+    T.tour("console", T.CONSOLE, FORCE)
 
 # ---------------------------------------------------------------- CHILLER LAB
 elif view == "Chiller lab":
@@ -509,6 +601,7 @@ elif view == "Chiller lab":
                "refrigerant and the compressor efficiency yourself.")
     last = st.session_state.get("last_day")
     left, right = st.columns([1, 2.2])
+    left = left.container(key="cf_labctl")
     with left:
         fl = st.selectbox("Refrigerant", list(REFRIGERANTS), format_func=lambda k: f"{REFRIGERANTS[k]} · {GWP[k]}")
         T_e = st.slider("Evaporating temperature [°C]", -10.0, 18.0, 8.0, 0.5)
@@ -530,7 +623,7 @@ elif view == "Chiller lab":
         m_ref = Q_kW * 1e3 / cyc.q_evap
     W_kW = m_ref * cyc.w_comp / 1e3
     with right:
-        st.iframe(cycle_html(cyc, m_ref, Q_kW, W_kW), height=470)
+        st.iframe(cycle_html(cyc, m_ref, Q_kW, W_kW, eta), height=640)
         g = st.columns(5)
         g[0].metric("COP", f"{cyc.cop:.2f}")
         g[1].metric("Carnot COP", f"{cyc.cop_carnot:.2f}")
@@ -555,27 +648,38 @@ elif view == "Chiller lab":
         "entropy generated [kW/K]": [sg["evaporator"] / 1e3, sg["compressor"] / 1e3, sg["condenser"] / 1e3, sg["valve"] / 1e3],
     }).style.format(precision=3), hide_index=True, width="stretch")
     st.caption("Entropy here assumes water 4 K warmer than the refrigerant in the evaporator and 4 K colder in the condenser.")
-    H("Cycle challenges")
+    H("Cycle challenges", "cf-chal")
     ch = [("Deliver 3,000 kW of cooling with a COP of 7.0 or more", Q_kW >= 2999 and cyc.cop >= 7.0, f"COP {cyc.cop:.2f}"),
           ("Deliver 3,000 kW with 350 kW of compressor power or less", Q_kW >= 2999 and W_kW <= 350, f"{W_kW:,.0f} kW"),
           ("Reach 70 % of the Carnot COP with a low-GWP refrigerant and a compressor efficiency of 0.85 or less",
            fl != "R134a" and cyc.second_law_eff >= 0.70 and eta <= 0.85, f"{100 * cyc.second_law_eff:.0f} % of Carnot")]
     for text, ok, now in ch:
         card(f'{text}<span class="cf-badge" style="color:{"#8FB39A" if ok else "#8A929C"}">{"met" if ok else "not yet"} · {now}</span>')
+    T.tour("lab", T.LAB, FORCE)
 
 # ---------------------------------------------------------------- COMPARE
 elif view == "Compare":
     st.markdown("### Compare two plans")
     st.caption("Two plants on the same day. The table shows what changed and by how much.")
-    c = st.columns(3)
-    climate = c[0].selectbox("Site and weather", list(CLIMATES), format_func=lambda k: CLIMATES[k].label, key="abc")
-    workload = c[1].selectbox("Workload", list(WORKLOADS), format_func=lambda k: WORKLOADS[k].label, key="abw")
-    tariff = c[2].selectbox("Electricity price", list(TARIFFS), format_func=lambda k: TARIFFS[k].label, key="abt")
-    H("Plan A")
-    va = settings_toolbar("A")
-    H("Plan B")
-    vb = settings_toolbar("B", defaults=PRESETS["Warm water"])
+    with st.container(key="cf_step1"):
+        st.markdown(step(1, "Choose the scenario", "Both plans face exactly the same day."), unsafe_allow_html=True)
+        c = st.columns(3)
+        climate = c[0].selectbox(":material/location_on: Site and weather", list(CLIMATES), format_func=lambda k: CLIMATES[k].label, key="abc")
+        workload = c[1].selectbox(":material/memory: Workload", list(WORKLOADS), format_func=lambda k: WORKLOADS[k].label, key="abw")
+        tariff = c[2].selectbox(":material/payments: Electricity price", list(TARIFFS), format_func=lambda k: TARIFFS[k].label, key="abt")
+    with st.container(key="cf_planA"):
+        st.markdown(step(2, "Set the two plants", "Change one thing in Plan B to see what that one thing does."), unsafe_allow_html=True)
+        H("Plan A")
+        va = settings_toolbar("A")
+        H("Plan B")
+        vb = settings_toolbar("B", defaults=PRESETS["Warm water"])
     A, B = run_day(freeze(va), climate, workload, tariff), run_day(freeze(vb), climate, workload, tariff)
+    st.markdown(step(3, "See what the difference did", "Cause first, then each machine it touched, then the result."), unsafe_allow_html=True)
+    fx = explain.effects(A, B, labels="Plan B differs from Plan A in ")
+    if fx:
+        st.markdown(explain.fx_html(fx, "cf-fx cf-fxcard"), unsafe_allow_html=True)
+    else:
+        card("The two plans are identical. Change something in Plan B.", "cf-note cf-fxcard")
     mean_on = lambda d, k, sc=1.0: float(np.nanmean(np.where(d.series["n_on"] > 0, d.series[k], np.nan)) * sc) if (d.series["n_on"] > 0).any() else float("nan")
     rows = [("Daily PUE", "pue", 3, ""), ("Chiller electrical COP", "cop_mean", 2, ""), ("Second-law efficiency of the cycle [%]", "eff2_mean", 1, "x100"),
             ("Cooling electricity [MWh]", "E_cool_MWh", 1, ""), ("Compressor electricity [MWh]", "E_comp_MWh", 1, ""),
@@ -596,21 +700,30 @@ elif view == "Compare":
     for label, a_, b_, nd in tab:
         d = "" if (a_ != a_ or b_ != b_) else f"{b_ - a_:+,.{nd}f}"
         h += f"<tr><td>{label}</td><td class='n'>{fm(a_, nd)}</td><td class='n'>{fm(b_, nd)}</td><td class='n'>{d}</td></tr>"
-    card(h + "</table>")
+    st.markdown(step(4, "Explore the numbers", "Every quantity for both plans, and B minus A."), unsafe_allow_html=True)
+    card(h + "</table>", "cf-card cf-cmp")
     a, b = st.columns(2)
     a.plotly_chart(charts.ab_chart(A, B, "T_inlet", "At the racks [°C]"), width="stretch")
     b.plotly_chart(charts.ab_chart(A, B, "cop", "Chiller electrical COP"), width="stretch")
     a, b = st.columns(2)
     a.plotly_chart(charts.ab_chart(A, B, "P_cool", "Cooling electricity [MW]", 1e-6), width="stretch")
     b.plotly_chart(charts.ab_chart(A, B, "pue", "PUE"), width="stretch")
+    T.tour("compare", T.COMPARE, FORCE)
+
+# ---------------------------------------------------------------- PROOF
+elif view == "Build a chiller":
+    st.iframe(kids_html(*kids_data()), height=900)
+    st.caption("The temperatures, pressures and bills in this game come from the same model as the rest of the site: one R-134a cycle "
+               "and fifteen simulated days in Los Angeles, one for each water temperature.")
+    T.tour("kids", T.KIDS, FORCE)
 
 # ---------------------------------------------------------------- PROOF
 else:
     st.markdown("### Proof")
-    st.caption("Why the numbers can be trusted. Every check on this page is recomputed by the model, and the same "
-               f"checks run as {N_TESTS} automated tests.")
+    card("<b>Why the numbers can be trusted.</b> Every check on this page is recomputed by the model as you open it, and the same "
+         f"checks run as {N_TESTS} automated tests. Nothing here is typed in by hand.", "cf-learn cf-proofintro")
     P = proof_data()
-    H("1 · The cycle against a textbook")
+    H("1 · The cycle against a textbook", "cf-p1")
     st.write("Çengel and Boles, Example 11-1: ideal R-134a cycle, 0.14 to 0.8 MPa, 0.05 kg/s.")
     names = {"Q_L_kW": "Cooling, Q_L [kW]", "W_kW": "Compressor work, W [kW]", "Q_H_kW": "Heat rejected, Q_H [kW]", "COP": "COP"}
     st.dataframe(pd.DataFrame(P["tb"]).assign(quantity=lambda d: d["quantity"].map(names)).rename(columns={"error_pct": "difference [%]"}).style.format(precision=3),
@@ -663,3 +776,4 @@ else:
     H("7 · How each device is modeled")
     st.dataframe(pd.DataFrame([dict(device=k, treatment="steady-state steady-flow" if v[0] == "SSSF" else "transient control volume",
                                     balance=v[1]) for k, v in DEVICES.items()]), hide_index=True, width="stretch")
+    T.tour("proof", T.PROOF, FORCE)

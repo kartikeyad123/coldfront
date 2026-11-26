@@ -19,10 +19,13 @@ streamlit run app.py
 | View | What it does |
 |---|---|
 | Work orders | Six shifts with fixed event timelines. The day pauses at each event so you can react. Grades A to D from margins. |
-| Console | Free play: any site, workload, price and plant. |
+| Console | Free play in four numbered steps: choose the scenario, set the plant, watch the day, explore the results. After every change a strip says what you changed and which equipment felt it. "Ask the plant" answers questions typed in your own words (keyword matching on the run's numbers, not an AI). |
 | Chiller lab | One refrigeration cycle: refrigerant, temperatures, efficiency, P-h and T-s diagrams. |
 | Compare | Two plans on the same day, with a table of differences. |
 | Proof | Every validation check, recomputed live. |
+| Build a chiller | A three-minute game for visitors with no engineering background: put the four parts of a chiller in a loop, watch the refrigerant go round, then choose how cold to make the water. |
+
+The plant drawing on every page shows each machine's state by colour (normal, high demand, inefficient, critical, offline), animates the water in its flow direction, marks the day's key moments on the timeline, and has an "Explore connections" mode: click a machine or a pipe to light up what it is connected to. Every page has its own guided tour.
 
 ## The model (`coldfront/`)
 
