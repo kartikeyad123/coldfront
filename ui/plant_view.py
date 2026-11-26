@@ -163,6 +163,12 @@ _TEMPLATE = r"""
  <text id="clock" x="600" y="74" text-anchor="middle" font-size="30" class="num" fill="#E6E8EB">00:00</text>
  <text x="1176" y="52" text-anchor="end" class="lab">Grid price</text>
  <text id="hud_price" x="1176" y="76" text-anchor="end" font-size="16" class="num" fill="#E6E8EB">--</text>
+ <g id="pgauge"><text x="318" y="52" class="lab">Cooling power</text>
+  <text id="pg_v" x="318" y="76" font-size="16" class="num" fill="#E6E8EB">--</text>
+  <rect x="426" y="64" width="92" height="9" rx="4.5" fill="#151A21" stroke="#2A313B"/><rect id="pg_b" x="426" y="64" width="0" height="9" rx="4.5" fill="#6FA8DC"/></g>
+ <g id="hgauge"><text x="700" y="52" class="lab">Heat to remove</text>
+  <text id="hg_v" x="700" y="76" font-size="16" class="num" fill="#E6E8EB">--</text>
+  <rect x="808" y="64" width="92" height="9" rx="4.5" fill="#151A21" stroke="#2A313B"/><rect id="hg_b" x="808" y="64" width="0" height="9" rx="4.5" fill="#D9A441"/></g>
  <line x1="24" y1="92" x2="1176" y2="92" stroke="#20262E"/>
 
  <!-- pipes, each drawn in its flow direction -->
@@ -330,6 +336,7 @@ function tempColor(T){ // steel blue (cold) -> ochre (warm, at limit) -> orange 
 function hhmm(h){const m=Math.round(h*60);return String(Math.floor(m/60)%24).padStart(2,"0")+":"+String(m%60).padStart(2,"0");}
 const f1=v=>v.toFixed(1), f2=v=>v.toFixed(2), f0=v=>Math.round(v).toLocaleString();
 const itMax=Math.max(...D.itreq), itMin=Math.min(...D.itreq);
+const pcMax=Math.max(1e-6,...D.wcomp.map((w,k)=>(w+D.pchw[k]+D.pcw[k]+D.pfan[k])/1e3));
 const mNom=C.qd*1e6/(4186*C.dT), mMax=1.5*Math.max(C.mchwd,mNom);
 let i=0, timer=null, dash=0, sel=C.focus||"chiller", mode="all", explore=false, selPipe=null, wf=100, fxUntil=0, fxHover=null;
 if(sel==="pumps") sel="pump_chw";
@@ -564,6 +571,13 @@ function draw(){
   $("lab_sup").textContent=`cold supply ${f1(C.chws)} °C`;
   $("lab_ret").textContent=`warm return ${f1(C.chws+C.dT)} °C`;
   $("lab_heat").textContent=`← ${f1(D.qloop[i])} MW of heat from the servers`;
+  // cooling power and heat load, with the direction they are moving
+  const pc=(D.wcomp[i]+D.pchw[i]+D.pcw[i]+D.pfan[i])/1e3, pp=i>0?(D.wcomp[i-1]+D.pchw[i-1]+D.pcw[i-1]+D.pfan[i-1])/1e3:pc;
+  const tr=(a,b,t)=>a>b+t?" ▲":(a<b-t?" ▼":"");
+  $("pg_v").textContent=f2(pc)+" MW"+tr(pc,pp,0.004); $("pg_v").setAttribute("fill", pc>pp+0.004?"#D97B3F":(pc<pp-0.004?"#6FA8DC":"#E6E8EB"));
+  $("pg_b").setAttribute("width", 92*Math.min(1,pc/pcMax)); $("pg_b").setAttribute("fill", pc>0.85*pcMax?"#D97B3F":"#6FA8DC");
+  const qh=D.itreq[i], qp=i>0?D.itreq[i-1]:qh;
+  $("hg_v").textContent=f2(qh)+" MW"+tr(qh,qp,0.01); $("hg_b").setAttribute("width", 92*Math.min(1,qh/Math.max(itMax,1e-6)));
   // pipe width follows the flow
   const fr=Math.min(1.5,D.mchw[i]/Math.max(mNom,1));
   // alert bar: red only for real alarms, ochre for notices
@@ -631,7 +645,7 @@ $("play").onclick=()=>{
   timer=setInterval(()=>{i++; if(i>=N){ if(C.autoplay){i=0;} else {i=N-1;stop("Replay");} } draw();}, +$("speed").value);
 };
 $("speed").onchange=()=>{if(timer){stop("Play day");$("play").click();}};
-if(C.compact){["panel","tl","modes","conn","fx","legend"].forEach(id=>$(id).style.display="none");$("sv").style.minWidth="0";$("sv").setAttribute("viewBox","0 0 1200 600");}
+if(C.compact){["panel","tl","modes","conn","fx","legend","pgauge","hgauge"].forEach(id=>$(id).style.display="none");$("sv").style.minWidth="0";$("sv").setAttribute("viewBox","0 0 1200 600");}
 if(C.start==="end") i=N-1; else if(C.start==="zero") i=0; else { const mx=Math.max(...D.Tin), mn=Math.min(...D.Tin); i = (mx-mn>0.2) ? D.Tin.indexOf(mx) : D.Tdb.indexOf(Math.max(...D.Tdb)); if(i<0)i=0; }
 buildTimeline(); right(); draw(); animate();
 if(C.autoplay){ i=0; $("play").click(); }

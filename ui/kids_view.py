@@ -10,12 +10,14 @@ import json
 
 
 def kids_html(cycle, table, limit=27.0):
+    from .art import ART
     """cycle: dict(T=[4], P=[4], x4); table: list of dict(T, peak, bill, pue)."""
-    return _T.replace("__C__", json.dumps(cycle)).replace("__TAB__", json.dumps(table)).replace("__LIM__", json.dumps(limit))
+    return _T.replace("__ART__", json.dumps(dict(hot=ART["hot"], ok=ART["ok"], cost=ART["cost"]))).replace("__C__", json.dumps(cycle)).replace("__TAB__", json.dumps(table)).replace("__LIM__", json.dumps(limit))
 
 
 _T = r"""
-<div id="kg">
+<div id="kg" style="position:relative">
+<div id="pop"><div class="box"><button class="x" id="popx" aria-label="Close">×</button><div id="popb"></div><button class="big" id="popok">Continue</button></div></div>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Inter:wght@400;500;600;700&display=swap');
 html,body{margin:0;background:transparent}
@@ -64,6 +66,14 @@ html,body{margin:0;background:transparent}
 #racks{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-top:10px}
 #racks i{height:54px;border-radius:4px;transition:background .2s}
 #stars{font-size:38px;letter-spacing:6px;color:#D9A441}
+#pop{display:none;position:absolute;inset:0;background:rgba(5,7,10,.78);z-index:20;align-items:flex-start;justify-content:center;padding-top:70px}
+#pop .box{background:#151A21;border:1px solid #3A4350;border-radius:14px;padding:22px 26px;max-width:520px;width:86%;position:relative;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.6)}
+#pop .x{position:absolute;right:12px;top:8px;font-size:26px;cursor:pointer;color:#A3ABB5;background:none;border:0;line-height:1}
+#pop .x:hover{color:#fff}
+#pop .st{font-size:46px;letter-spacing:8px;color:#D9A441}
+#pop h3{font-size:24px;margin:6px 0 8px 0}
+#pop p{font-size:16px;line-height:1.5;color:#C3C9D1;margin:0 0 6px 0}
+#pop .hint{background:#0E1116;border-left:3px solid #6FA8DC;border-radius:0 8px 8px 0;padding:8px 12px;text-align:left;font-size:15px;margin-top:10px}
 </style>
 <h2>Build a chiller</h2>
 <div class="sub">The machine that keeps an AI data center from melting. No instructions needed: just try.</div>
@@ -107,7 +117,7 @@ html,body{margin:0;background:transparent}
    <div class="big"><span id="tv">10</span> °C</div>
    <input id="tw" type="range" min="6" max="20" step="1" value="6"/>
    <div class="lab"><span>ice cold</span><span>barely cool</span></div>
-   <button class="big" id="lock">Lock it in</button>
+   <button class="big" id="lock">Lock it in</button><button class="ghost" id="give2" style="display:none">I give up: show me</button>
   </div>
   <div class="box">
    <div class="lab"><span>Hottest server today</span><b id="pk"></b></div>
@@ -124,7 +134,7 @@ html,body{margin:0;background:transparent}
 </div>
 </div>
 <script>
-const C=__C__, TAB=__TAB__, LIM=__LIM__;
+const C=__C__, TAB=__TAB__, LIM=__LIM__, ARTS=__ART__;
 const $=id=>document.getElementById(id), NS="http://www.w3.org/2000/svg";
 function sv(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p.appendChild(e);return e;}
 const ICON={
@@ -137,7 +147,7 @@ const PARTS={
  cond:{n:"Condenser",d:"I let hot gas dump its heat. It turns into liquid.",no:"The condenser throws heat away. Where can heat leave?"},
  valve:{n:"Valve",d:"I release the pressure. The liquid turns icy cold.",no:"The valve lets the pressure go. Look for where pressure is released."},
  evap:{n:"Evaporator",d:"I soak up heat. The cold liquid boils back to gas.",no:"The evaporator soaks up heat. Where is the heat coming from?"}};
-let placed={}, pick=null, tries=0, drag=null;
+let placed={}, pick=null, tries=0, drag=null, wrong=0, gave=false;
 // ---------------------------------------------------------------- level 1: build
 function card(k){const d=document.createElement("div");d.className="part";d.dataset.k=k;d.innerHTML=ICON[k]+`<div><b>${PARTS[k].n}</b><small>${PARTS[k].d}</small></div>`;return d;}
 function tray(){const t=$("tray");t.innerHTML="";["valve","cond","evap","comp"].forEach(k=>{ if(placed[k])return; const c=card(k); t.appendChild(c);
@@ -158,7 +168,9 @@ function moveGhost(e){ if(drag){ drag.g.style.left=(e.clientX-105)+"px"; drag.g.
 function drop(k,s){ if(s.classList.contains("full")) return; tries++;
   if(s.dataset.slot===k){ placed[k]=true; s.classList.add("full"); s.innerHTML=""; const c=card(k); c.classList.add("inslot"); s.appendChild(c); pick=null; tray();
     const left=4-Object.keys(placed).length; say(left? `Yes! The <b>${PARTS[k].n.toLowerCase()}</b> goes there. ${left} to go.` : "", "good"); if(!left) built(); }
-  else { s.classList.remove("bad"); void s.offsetWidth; s.classList.add("bad"); say("Not there. "+PARTS[k].no,"oops"); } }
+  else { s.classList.remove("bad"); void s.offsetWidth; s.classList.add("bad"); say("Not there. "+PARTS[k].no,"oops"); wrong++;
+    if(wrong>=3 && !$("giveup")){ $("btns").innerHTML='<button class="ghost" id="giveup" style="margin-left:0">I give up: show me</button>';
+      $("giveup").onclick=()=>{ gave=true; ["comp","cond","valve","evap"].forEach(q=>{ if(!placed[q]) drop(q, document.querySelector(`.slot[data-slot=${q}]`)); }); }; } } }
 document.querySelectorAll(".slot").forEach(s=>s.addEventListener("click",()=>{ if(pick) drop(pick,s); }));
 // ---------------------------------------------------------------- level 1b: watch it run
 const path=$("kloop"), L=path.getTotalLength(), dots=[];
@@ -191,6 +203,10 @@ function built(){
   for(let k=0;k<40;k++) dots.push(sv("circle",{r:5,"stroke-width":2},$("kdots")));
   readouts(); tick(); fitNow();
   say(`<b>It runs!</b> You built it in ${tries} ${tries===1?"try":"tries"}. Solid blobs are liquid, hollow ones are gas. Blue is cold, orange is hot.`,"good");
+  const bs = gave?0:(tries<=4?3:(tries<=6?2:1));
+  if(gave) pop(null,"Here is how it goes together","Squeezer on the side where the gas gets squeezed, heat dumper facing outside, pressure release opposite the squeezer, heat soaker facing the servers. Watch it run, then try level 2 yourself.",null,"Watch it run");
+  else pop(bs, bs===3?"Perfect build!":"You built a chiller!", `You placed all four parts in ${tries} ${tries===1?"try":"tries"}. The squeezer faces the hot side, the heat soaker faces the servers, and now the refrigerant is going round.`,
+      bs===3?null:"Each part sits where its job happens: heat leaves at the top, heat comes in at the bottom.", "Watch it run","ok");
   const b=$("btns"); b.innerHTML='<button class="big" id="nx">Follow the refrigerant →</button>';
   $("nx").onclick=()=>{ lit++; document.querySelectorAll(".read").forEach(e=>e.classList.remove("lit"));
     if(lit<4){ $(STORY[lit].r).classList.add("lit"); say(STORY[lit].t); $("nx").textContent = lit<3?"Next →":"What did I just learn?"; }
@@ -199,6 +215,11 @@ function built(){
       say("Heat only flows from hot to cold by itself. The trick of a chiller is to make the fluid hotter than outside in one place and colder than the servers in another.","good");
       b.innerHTML='<button class="big" id="go2">Level 2: keep the servers cool →</button>'; $("go2").onclick=level2; fitNow(); } };
 }
+function pop(stars,title,text,hint,ok,art){ const s = (art?`<div style="margin:-6px 0 -8px 0">${ARTS[art]}</div>`:"") + (stars===null ? "" : `<div class="st">${"★".repeat(stars)}<span style="color:#3A4350">${"★".repeat(3-stars)}</span></div>`);
+  $("popb").innerHTML=s+`<h3>${title}</h3><p>${text}</p>`+(hint?`<div class="hint"><b>Hint:</b> ${hint}</div>`:"");
+  $("popok").textContent=ok||"Continue"; $("pop").style.display="flex"; $("kg").scrollIntoView({block:"start"}); try{ window.frameElement.scrollIntoView({block:"start",behavior:"smooth"}); }catch(e){} }
+function unpop(){ $("pop").style.display="none"; }
+$("popx").onclick=unpop; $("popok").onclick=unpop; $("pop").addEventListener("click",e=>{ if(e.target.id==="pop") unpop(); });
 function lesson(id,t){ const e=$(id); e.style.display="grid"; e.innerHTML=["You did","The machine did","So we learn"].map((h,i)=>`<div><span>${h}</span>${t[i]}</div>`).join(""); }
 // ---------------------------------------------------------------- level 2: how cold?
 const bmin=Math.min(...TAB.map(r=>r.bill)), bmax=Math.max(...TAB.map(r=>r.bill));
@@ -212,7 +233,9 @@ function l2draw(){ const T=+$("tw").value, r=row(T); $("tv").textContent=T;
   $("ok").textContent=hot?"TOO HOT":"safe"; $("ok").style.color=hot?"#E06A50":"#8FB39A";
   const f=Math.max(0,Math.min(1,(r.peak-14)/(LIM-14))); const c=hot?"#E06A50":`rgb(${[111,168,220].map((v,i)=>Math.round(v+([217,164,65][i]-v)*f))})`;
   document.querySelectorAll("#racks i").forEach(e=>e.style.background=c); }
-function level2(){ $("l1").style.display="none"; $("l2").style.display="block"; $("s2").className="done"; $("s3").className="on"; running=false;
+let fails=0;
+function level2(){ $("give2").onclick=()=>{ $("tw").value=best.T; l2draw(); pop(null,"The best setting is "+best.T+" °C",`That is the warmest water that still keeps the servers at or under ${LIM} °C. Any colder and you pay for cooling you do not need. Any warmer and the servers overheat.`,null,"Got it"); };
+ $("l1").style.display="none"; $("l2").style.display="block"; $("s2").className="done"; $("s3").className="on"; running=false;
   $("limtxt").textContent=LIM+" °C"; const R=$("racks"); R.innerHTML=""; for(let k=0;k<16;k++) R.appendChild(document.createElement("i"));
   $("tw").min=TAB[0].T; $("tw").max=TAB[TAB.length-1].T; $("tw").value=TAB[0].T; $("tw").oninput=l2draw; l2draw(); fitNow();
   $("lock").onclick=()=>{ const r=row(+$("tw").value), hot=r.peak>LIM+0.05, extra=r.bill-best.bill;
@@ -225,6 +248,10 @@ function level2(){ $("l1").style.display="none"; $("l2").style.display="block"; 
     if(!hot){ $("lesson2").style.display="grid"; lesson("lesson2",[`You set the water to ${r.T} °C.`,
         `The servers peaked at ${r.peak.toFixed(1)} °C and cooling cost $${Math.round(r.bill).toLocaleString()}. At ${cold.T} °C it costs $${Math.round(cold.bill).toLocaleString()}.`,
         "Colder is not safer, only more expensive. Engineers pick the <b>warmest</b> water the servers allow, because the chiller then has less of a hill to push heat up."]); }
+    fails += stars<3 ? 1 : 0; if(fails>=2) $("give2").style.display="inline-block";
+    if(hot) pop(0,"Too hot. Don't worry, try again!",`You set the water to ${r.T} °C, so the servers reached ${r.peak.toFixed(1)} °C. The limit is ${LIM} °C.`,"The servers get the water plus about 8 °C. Slide the water a little colder.","Try again","hot");
+    else if(stars===3) pop(3,"Three stars!",`Water at ${r.T} °C kept the servers safe at ${r.peak.toFixed(1)} °C for only $${Math.round(r.bill).toLocaleString()}. Warmer water means the chiller pushes heat up a smaller hill, so it uses less electricity.`,null,"See what I learned","ok");
+    else pop(stars,"Safe, but you overpaid.",`Water at ${r.T} °C kept the servers at ${r.peak.toFixed(1)} °C, far below the ${LIM} °C limit. You paid $${Math.round(extra).toLocaleString()} more than you needed to.`,"When the water is warmer, the bill goes down. How warm can you go before the servers hit the limit?","Try again","cost");
     $("btns2").innerHTML= stars===3 ? '<button class="big" id="again">Play again</button><span style="margin-left:14px;color:#B4BAC2;font-size:15px">Ready for the real thing? Open <b>Work orders</b> at the top and play First Shift.</span>' : '';
     const a=$("again"); if(a) a.onclick=()=>{ $("lesson2").style.display="none"; $("btns2").innerHTML=""; $("tw").value=TAB[0].T; l2draw(); $("msg2").innerHTML=`Goal: keep every server under <b>${LIM} °C</b> and spend as little as you can.`; }; fitNow(); }; }
 function fitNow(){ try{ const fe=window.frameElement; if(!fe) return; const h=Math.ceil($("kg").getBoundingClientRect().height)+8;

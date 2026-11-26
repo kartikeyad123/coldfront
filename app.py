@@ -12,12 +12,26 @@ from dataclasses import replace
 import numpy as np
 import pandas as pd
 import streamlit as st
+import sys
+
+# After an upload of several files the server can still hold old copies of this
+# project's modules in memory. If one is out of date, drop them all and load fresh.
+try:
+    from ui.theme import flow as _probe1          # noqa: F401
+    from ui.kids_view import kids_html as _probe2  # noqa: F401
+    from ui import explain as _probe3, ask as _probe4   # noqa: F401
+    from ui.art import alert as _probe7                 # noqa: F401
+    from coldfront.contracts import plans_for as _probe5  # noqa: F401
+    from coldfront.plant import MAX_FLOW as _probe6      # noqa: F401
+except ImportError:
+    for _m in [m for m in sys.modules if m == "ui" or m == "coldfront" or m.startswith(("ui.", "coldfront."))]:
+        del sys.modules[_m]
 
 from coldfront.plant import PlantSettings, DEVICES, C2K
 from coldfront.day import simulate_day
 from coldfront.chiller import solve_cycle, REFRIGERANTS, ETA_PEAK
 from coldfront.scenarios import CLIMATES, WORKLOADS, TARIFFS
-from coldfront.contracts import ORDERS, WORK_ORDERS, SETS, get_order, run_order, evaluate
+from coldfront.contracts import ORDERS, WORK_ORDERS, SETS, get_order, run_order, evaluate, plans_for
 from coldfront import checks
 from ui import charts
 from ui.theme import CSS, header, flow, step
@@ -26,6 +40,7 @@ from ui.cycle_view import cycle_html
 from ui.kids_view import kids_html
 from ui import tour as T
 from ui import explain, ask
+from ui.art import ART, alert
 
 st.set_page_config(page_title="COLDFRONT", page_icon="❄", layout="wide", initial_sidebar_state="collapsed")
 st.markdown(CSS, unsafe_allow_html=True)
@@ -307,6 +322,74 @@ def _ask_box(day, key):
             colm.button(ask.TOPICS[k][0], key=f"{key}alt{k}", width="stretch", on_click=put, args=(ask.TOPICS[k][0],))
 
 
+HEAD = {"A": "You scored an A!", "B": "You scored a B. It works.", "C": "You scored a C. Nearly.", "D": "You scored a D. Don't worry, try again."}
+
+
+def _val(r, v):
+    t = f"{v:,.{r['nd']}f}"
+    return ("$" + t) if r["unit"] == "$" else (t + (" " + r["unit"] if r["unit"] else ""))
+
+
+SAY = dict(T_chws_C=lambda v: f"set the water supply temperature to <b>{v:g} °C</b>", dT_chw=lambda v: f"set the water temperature rise to <b>{v:g} °C</b>",
+           rejection=lambda v: "switch heat rejection to the <b>" + ("dry cooler" if v == "dry" else "cooling tower") + "</b>",
+           tank=lambda v: "turn the <b>storage tank on</b>", tank_MWh=lambda v: f"tank capacity <b>{v:g} MWh</b>",
+           tank_rate_MW=lambda v: f"tank rate <b>{v:g} MW</b>", price_charge=lambda v: f"charge when the price is at or below <b>${v:g}</b>",
+           price_discharge=lambda v: f"discharge at or above <b>${v:g}</b>")
+
+
+def answer_html(o):
+    """The reference answer of a work order, step by step, with the reason."""
+    when = ["Before you start"] + [f"At the {int(t):02d}:{int(t % 1 * 60):02d} pause" for t in o.pauses]
+    steps = list(o.solution) + [{}] * (len(when) - len(o.solution))
+    li = "".join(f"<li><b>{w}:</b> " + (", ".join(SAY[k](v) for k, v in st_.items()) if st_ else "change nothing") + ".</li>"
+                 for w, st_ in zip(when, steps))
+    return (f"<b>One answer that earns an A</b><ol style='margin:6px 0 8px 18px'>{li}</ol>"
+            f"<b>Why.</b> {o.lesson}")
+
+
+@st.dialog("Shift complete", width="large")
+def result_popup(o, grade, rows, fx, retry, give_up):
+    """The moment the grade lands: what you got, why, and what to try next."""
+    missed = [r for r in rows if not r["met"]]
+    names = " ".join(r["target"].lower() for r in missed)
+    if grade in "AB":
+        kind, eyebrow, colr, title = "ok", f"GRADE {grade}", "#8FB39A", HEAD[grade]
+    elif any(w in names for w in ("inlet", "above", "compute", "coolant")):
+        kind, eyebrow, colr, title = "hot", f"⚠ WARNING · GRADE {grade}", "#E5574B", ("Coolant too hot" if "coolant" in names else "Data hall overheated")
+    elif "water" in names:
+        kind, eyebrow, colr, title = "water", f"⚠ WARNING · GRADE {grade}", "#E5574B", "Water permit broken"
+    else:
+        kind, eyebrow, colr, title = "cost", f"GRADE {grade}", "#D9A441", "Safe, but wasteful"
+    sub = VERDICT[grade] if grade in "AB" else ("Don't worry. Read the hint and try again." if grade == "D" else "The servers were fine. The plant used more than it needed to.")
+    st.markdown(alert(kind, eyebrow, title, sub, colr), unsafe_allow_html=True)
+    eff = [r for r in rows if r["kind"] != "safety"]
+    if grade in "AB":
+        won = "; ".join(f"{r['target']} {_val(r, r['achieved'])} against a limit of {_val(r, r['limit'])}" for r in eff)
+        card(f"<b>Why it worked.</b> {o.lesson}<br><span class='cf-mono'>Your numbers: {won}.</span>", "cf-note")
+        if grade == "B":
+            need = "; ".join(f"{r['target']} at or below {_val(r, r['a_level'])}" for r in eff if r["a_level"] is not None)
+            card(f"<b>For an A:</b> {need}. Hint: {o.hint}", "cf-learn")
+    else:
+        what = "; ".join(f"<b>{r['target']}</b> was {_val(r, r['achieved'])}, and the limit is {_val(r, r['limit'])}" for r in missed)
+        card(f"<b>What went wrong.</b> {what}.", "cf-alert" if grade == "D" else "cf-note")
+        card(f"<b>Hint.</b> {o.hint}", "cf-learn")
+        with st.expander("I give up: show me the answer"):
+            st.markdown(answer_html(o), unsafe_allow_html=True)
+            if st.button("Play the answer for me", icon=":material/smart_display:", key="popgive"):
+                give_up()
+                st.rerun()
+    if fx:
+        chips = " ".join(f"<br>· <b>{x['label']}:</b> {x['text']}" for x in fx["items"][:3])
+        card(f"<b>What your change did.</b> {fx['head']}{chips}", "cf-card")
+    c = st.columns(2)
+    if c[0].button("See the details", width="stretch", type="primary" if grade in "AB" else "secondary", icon=":material/visibility:"):
+        st.rerun()
+    if c[1].button("Try again", width="stretch", type="primary" if grade in "CD" else "secondary", icon=":material/replay:"):
+        retry()
+        st.rerun()
+    st.caption("Close this box to see the full result, the replay of the day and Ask the plant.")
+
+
 def day_dashboard(day, key, anim=None, start="hot", fx=None, plant=True):
     if plant:
         st.caption("Press Play day or drag the slider. Click any equipment or pipe in the drawing to see inside it. "
@@ -463,52 +546,53 @@ elif view == "Work orders":
                 card(f'<div class="n">GUIDE · STEP {step + 1} OF {len(o.guide)}</div>{o.guide[step]}', "cf-guide")
 
         if stage == 0:                                   # ---- briefing
-            a, b = st.columns([1.2, 1])
-            with a:
+            jl, jr = st.columns([2.3, 1], gap="medium")
+            with jl:
                 card(f"<b>The job.</b> {o.brief}<br><br><b>How it is scored.</b> Each attempt earns a grade for the setup you chose. A: every target met, with room "
                      f"to spare. B: every target met. C: servers safe, efficiency missed. D: a safety limit crossed. Retry as often as you like.", "cf-card cf-job")
                 if o.events:
                     card("<b>Expect:</b> the shift pauses when something happens, so you can change the plant and resume.", "cf-note")
-            with b:
                 card(targets_table(), "cf-card cf-targets")
-            guide(2 if ("wo_prev_" + key) in st.session_state else 0)
-            H("Set the plant for the start of the shift")
-            v = settings_toolbar(f"wo{key}{var}t{tries}s0", o.locks, dict(o.start, **last[0]) if last else o.start, o.limits)
-            if last:
-                st.caption("These are the settings from your last attempt.")
-            fixed = [LOCK_NAMES[k] for k in o.locks if k in LOCK_NAMES]
-            if fixed:
-                st.caption("Fixed by this work order: " + ", ".join(fixed) + ".")
-            c = st.columns([1, 1, 1, 3])
-            c[0].button("Start shift", type="primary", width="stretch", on_click=lambda: plans.append(v))
-            c[1].button("New numbers", width="stretch", on_click=new_numbers, key="nn0",
-                        help="Same problem with different numbers. There are three sets.")
-            if last:
-                c[2].button("Reset the plant", width="stretch", on_click=reset_plant,
-                            help="Put every setting back to where this work order starts.")
-            with st.expander("Hint"):
-                st.write(o.hint)
+                guide(2 if ("wo_prev_" + key) in st.session_state else 0)
+            with jr.container(key="cf_ctl"):
+                st.markdown(step("→", "Set the plant, then start", "Open a control, change it, click outside to close."), unsafe_allow_html=True)
+                v = settings_toolbar(f"wo{key}{var}t{tries}s0", o.locks, dict(o.start, **last[0]) if last else o.start, o.limits, vertical=True)
+                if last:
+                    st.caption("These are the settings from your last attempt.")
+                fixed = [LOCK_NAMES[k] for k in o.locks if k in LOCK_NAMES]
+                if fixed:
+                    st.caption("Fixed by this work order: " + ", ".join(fixed) + ".")
+                st.button("Start shift", type="primary", width="stretch", on_click=lambda: plans.append(v), icon=":material/play_arrow:")
+                st.button("New numbers", width="stretch", on_click=new_numbers, key="nn0", icon=":material/casino:",
+                          help="Same problem with different numbers. There are three sets.")
+                if last:
+                    st.button("Reset the plant", width="stretch", on_click=reset_plant, icon=":material/restart_alt:",
+                              help="Put every setting back to where this work order starts.")
+                with st.expander("Hint"):
+                    st.write(o.hint)
             T.tour("brief", T.BRIEF, FORCE)
         else:
             day = run_wo(key, var, tuple(freeze(p) for p in plans), until)
             if not finished:                             # ---- paused at an event
                 ev = [e for e in o.events if e.pause][stage - 1]
-                card(f'<span class="cf-mono">PAUSED AT {int(ev.t):02d}:{int(ev.t % 1 * 60):02d}</span><br>'
-                     f'<span style="font-size:18px;font-weight:600">{ev.title}</span><br>{ev.text}',
-                     ("cf-alert" if ev.kind == "trip" else "cf-note") + " cf-event")
-                H("Change the plant, then resume")
+                kind = dict(trip="trip", heat="heat", load="load").get(ev.kind, "price")
+                card(alert(kind, f"{'⚠ ' if ev.kind == 'trip' else ''}PAUSED AT {int(ev.t):02d}:{int(ev.t % 1 * 60):02d}", ev.title, ev.text,
+                           "#E5574B" if ev.kind == "trip" else "#D9A441"), ("cf-alert" if ev.kind == "trip" else "cf-note") + " cf-event")
                 dflt = dict(plans[-1])
                 if last and stage < len(last):               # repeat what you changed at this pause last time
                     dflt.update({k: x for k, x in last[stage].items() if last[stage - 1].get(k) != x})
+                pl, pr = st.columns([3.1, 1], gap="medium")
+                with pr.container(key="cf_ctl"):
+                    st.markdown(step("→", "Change the plant, then resume", "What you set applies from now to the end of the day."), unsafe_allow_html=True)
                     if dflt != plans[-1]:
                         st.caption("The change you made at this pause last time is already applied.")
-                v = settings_toolbar(f"wo{key}{var}t{tries}s{stage}", o.locks, dflt, o.limits)
-                c = st.columns([1, 1, 4])
-                c[0].button("Resume shift", type="primary", width="stretch", on_click=lambda: plans.append(v))
-                c[1].button("Restart", width="stretch", on_click=lambda: plans.clear())
-                with st.expander("Hint"):
-                    st.write(o.hint)
-                st.iframe(plant_html(day, start="end", focus="hall" if ev.kind in ("trip", "load") else "tower"), height=PLANT_H)
+                    v = settings_toolbar(f"wo{key}{var}t{tries}s{stage}", o.locks, dflt, o.limits, vertical=True)
+                    st.button("Resume shift", type="primary", width="stretch", on_click=lambda: plans.append(v), icon=":material/play_arrow:")
+                    st.button("Restart", width="stretch", on_click=lambda: plans.clear(), icon=":material/replay:")
+                    with st.expander("Hint"):
+                        st.write(o.hint)
+                with pl:
+                    st.iframe(plant_html(day, start="end", focus="hall" if ev.kind in ("trip", "load") else "tower"), height=PLANT_H)
                 T.tour("pause", T.PAUSE, FORCE)
             else:                                        # ---- debrief
                 grade, rows = evaluate(o, day.metrics)
@@ -530,17 +614,30 @@ elif view == "Work orders":
                                                                  "cost_cooling" if any(t.metric == "cost_cooling" for t in o.targets) else "pue"), "cf-card cf-what")
                 if grade in "AB":
                     card(f"<b>Why it worked.</b> {o.lesson}<br><span class='cf-mono'>The idea: {o.teaches}</span>", "cf-note")
-                else:
-                    with st.expander("Hint"):
-                        st.write(o.hint)
                 c = st.columns([1, 1, 1, 3])
 
                 def again():
                     st.session_state["wo_prev_" + key] = dict(day.metrics, short_MW=float(np.max(day.series["shortfall"])) / 1e6)
                     st.session_state["wo_last_" + key] = [dict(p) for p in plans]
                     st.session_state["wo_try_" + key] = tries + 1
+                    st.session_state["wo_gave_up_" + key] = False
                     plans.clear()
+                def give_up():                     # load the reference answer and run it
+                    again()
+                    full = [dict(p.__dict__) for p in plans_for(o, o.solution)]
+                    st.session_state["wo_gave_up_" + key] = True
+                    plans.extend({k: x for k, x in f.items() if k in plans_keys} for f in full)
+                plans_keys = set(day.settings.__dict__) if not plans else set(plans[0])
                 c[0].button("Try again", type="primary" if grade in "CD" else "secondary", width="stretch", on_click=again)
+                if grade in "CD":
+                    h1, h2 = st.columns(2)
+                    with h1.expander("Hint"):
+                        st.write(o.hint)
+                    with h2.expander("I give up: show me the answer"):
+                        st.markdown(answer_html(o), unsafe_allow_html=True)
+                        st.button("Play the answer for me", icon=":material/smart_display:", on_click=give_up, key="pggive")
+                elif st.session_state.get("wo_gave_up_" + key):
+                    card("<b>This was the reference answer, played for you.</b> Press <b>Try again</b> or <b>New numbers</b> to solve one yourself.", "cf-note")
                 nxt = ORDERS[(ORDERS.index(WORK_ORDERS[key]) + 1) % len(ORDERS)]
                 c[1].button("New numbers", width="stretch", on_click=new_numbers, key="nn1",
                             help="Same problem with different numbers. There are three sets.")
@@ -551,7 +648,12 @@ elif view == "Work orders":
                     fx = explain.effects(run_wo(key, var, tuple(freeze(p) for p in last), 24.0), day, labels="Since your last attempt: ",
                                          stages=[(when[k], last[k], plans[k]) for k in range(len(plans))])
                 day_dashboard(day, "wo" + key, fx=fx)
-                T.tour("result", T.RESULT, FORCE)
+                attempt = (var, tries)                           # the pop-up opens once for each finished attempt
+                if st.session_state.get("wo_pop_" + key) != attempt and not st.session_state.get("wo_gave_up_" + key):
+                    st.session_state["wo_pop_" + key] = attempt
+                    result_popup(o, grade, rows, fx, again, give_up)
+                else:
+                    T.tour("result", T.RESULT, FORCE)
 
 # ---------------------------------------------------------------- CONSOLE (free play)
 elif view == "Console":
@@ -569,6 +671,21 @@ elif view == "Console":
             st.markdown(step(2, "Set the plant", "Pick a starting point, then open a control and change it."), unsafe_allow_html=True)
             preset = st.selectbox(":material/tune: Start from", list(PRESETS))
             v = settings_toolbar("con" + preset, defaults=PRESETS[preset], vertical=True)
+            pk = "con" + preset
+
+            def bump(key, value):
+                st.session_state[key] = value
+            st.markdown('<div class="cf-h" style="margin-top:16px">Quick experiments</div>', unsafe_allow_html=True)
+            st.caption("One click changes one thing. The whole plant is solved again and every machine that felt it lights up.")
+            hi = 20.0 if v["rack_cooling"] == "air" else 40.0
+            st.button("Warm the water by 2 °C", width="stretch", icon=":material/thermostat:", disabled=v["T_chws_C"] >= hi,
+                      on_click=bump, args=(pk + "chws" + v["rack_cooling"], min(hi, v["T_chws_C"] + 2.0)))
+            st.button("Slow the pumps (rise + 2 °C)", width="stretch", icon=":material/speed:", disabled=v["dT_chw"] >= 12.0,
+                      on_click=bump, args=(pk + "dt", min(12.0, v["dT_chw"] + 2.0)))
+            st.button("Take one chiller away", width="stretch", icon=":material/power_off:", disabled=v["n_chillers"] <= 1,
+                      on_click=bump, args=(pk + "n", max(1, v["n_chillers"] - 1)))
+            st.button("Swap tower and dry cooler", width="stretch", icon=":material/swap_horiz:",
+                      on_click=bump, args=(pk + "rej", "dry" if v["rejection"] == "tower" else "tower"))
     day = run_day(freeze(v), climate, workload, tariff)
     st.session_state["last_day"] = day
     cur = (freeze(v), climate, workload, tariff)                 # remember the run before the latest change

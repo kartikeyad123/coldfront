@@ -37,7 +37,7 @@ BRIEF = [
          text="Each target has a limit. Stay inside every limit to pass. PUE is total power divided by computer power, so lower is better."),
     dict(css=".cf-guide", title="Follow the blue card",
          text="On this first mission a blue guide card always tells you the next step."),
-    dict(button="Chilled water", closest=ROW, title="These four buttons are your controls",
+    dict(css=".st-key-cf_ctl", title="These four buttons are your controls",
          text="Each one opens a panel for part of the plant: water temperature, chillers, tower or dry cooler, storage tank. For now, leave them as they are."),
     dict(button="Start shift", title="Run the day",
          text="Press Start shift. The model simulates 24 hours in a second and shows you what happened.", last="Got it"),
@@ -59,7 +59,7 @@ RESULT = [
 PAUSE = [
     dict(css=".cf-event", title="The shift has paused",
          text="Something just happened. This card says what, and what it means for the plant."),
-    dict(button="Chilled water", closest=ROW, title="React",
+    dict(css=".st-key-cf_ctl", title="React",
          text="Change the plant with the same four controls. Whatever you set now applies from this minute onward."),
     dict(button="Resume shift", title="Then resume",
          text="Resume runs the rest of the day with your new settings. Or resume without changes to see what happens. Restart takes you back to the briefing.", last="Got it"),
