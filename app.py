@@ -14,18 +14,21 @@ import pandas as pd
 import streamlit as st
 import sys
 
-# After an upload of several files the server can still hold old copies of this
-# project's modules in memory. If one is out of date, drop them all and load fresh.
-try:
-    from ui.theme import flow as _probe1          # noqa: F401
-    from ui.kids_view import kids_html as _probe2  # noqa: F401
-    from ui import explain as _probe3, ask as _probe4   # noqa: F401
-    from ui.art import alert as _probe7                 # noqa: F401
-    from coldfront.contracts import plans_for as _probe5  # noqa: F401
-    from coldfront.plant import MAX_FLOW as _probe6      # noqa: F401
-except ImportError:
-    for _m in [m for m in sys.modules if m == "ui" or m == "coldfront" or m.startswith(("ui.", "coldfront."))]:
+# After an upload the server can still hold old copies of this project's modules in
+# memory (new app.py, old ui/theme.py). On every run, compare each project file's
+# timestamp with the one seen last time; if any changed, drop them all and load fresh.
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+_stamp = {}
+for _d in ("ui", "coldfront"):
+    for _f in sorted(os.listdir(os.path.join(_ROOT, _d))):
+        if _f.endswith(".py"):
+            _stamp[_d + "/" + _f] = os.path.getmtime(os.path.join(_ROOT, _d, _f))
+if getattr(sys, "_coldfront_stamp", None) != _stamp:
+    for _m in [m for m in sys.modules if m in ("ui", "coldfront") or m.startswith(("ui.", "coldfront."))]:
         del sys.modules[_m]
+    if getattr(sys, "_coldfront_stamp", None) is not None:
+        st.cache_data.clear()                      # results computed by the old code
+    sys._coldfront_stamp = _stamp
 
 from coldfront.plant import PlantSettings, DEVICES, C2K
 from coldfront.day import simulate_day
