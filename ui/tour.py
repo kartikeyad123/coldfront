@@ -39,8 +39,8 @@ BRIEF = [
          text="On this first mission a blue guide card always tells you the next step."),
     dict(css=".st-key-cf_ctl", title="These four buttons are your controls",
          text="Each one opens a panel for part of the plant: water temperature, chillers, tower or dry cooler, storage tank. For now, leave them as they are."),
-    dict(button="Start shift", title="Run the day",
-         text="Press Start shift. The model simulates 24 hours in a second and shows you what happened.", last="Got it"),
+    dict(button="Start mission", title="Run the day",
+         text="Press Start mission. The model simulates 24 hours in a second and shows you what happened.", last="Got it"),
 ]
 
 RESULT = [
@@ -61,15 +61,17 @@ PAUSE = [
          text="Something just happened. This card says what, and what it means for the plant."),
     dict(css=".st-key-cf_ctl", title="React",
          text="Change the plant with the same four controls. Whatever you set now applies from this minute onward."),
-    dict(button="Resume shift", title="Then resume",
+    dict(button="Resume mission", title="Then resume",
          text="Resume runs the rest of the day with your new settings. Or resume without changes to see what happens. Restart takes you back to the briefing.", last="Got it"),
 ]
 
 LIST = [
     dict(css=".cf-wocard", title="Six missions",
          text="Each card is one shift at a client's site, with its own problem to solve. They are in the recommended order, but all are open."),
-    dict(button="Open", title="Open one",
-         text="Open a card to read the job and its targets. Each mission has three sets of numbers.", last="Got it"),
+    dict(css=".cf-rank", title="Your rank",
+         text="Clear shifts to fill the bar and collect medals. Six golds makes you Chief engineer."),
+    dict(button="Play", title="Play one",
+         text="Press Play to read the briefing and its objectives. Each mission has three sets of numbers.", last="Got it"),
 ]
 
 CONSOLE = [

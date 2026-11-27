@@ -65,6 +65,49 @@ div[data-testid="stPopover"] button, .stButton button { border:1px solid #2A313B
 .cf-fx .arrow { align-self:center; color:#8A929C; }
 .cf-ask { border:1px solid #2A313B; background:#151A21; border-radius:8px; padding:14px 16px; margin:8px 0; line-height:1.55; font-size:15px; }
 .cf-ask b { color:#E6E8EB; }
+.cf-rank { display:flex; align-items:center; gap:22px; border:1px solid #2A313B; border-radius:8px; padding:16px 20px; margin:6px 0 18px 0;
+  background:linear-gradient(90deg,#151A21 0%,#10141A 100%); }
+.cf-rank .r { font-family:'Source Serif 4',Georgia,serif; font-size:26px; font-weight:600; color:#E6E8EB; line-height:1.1; }
+.cf-rank .bar { flex:1; height:8px; border-radius:4px; background:#1B2129; overflow:hidden; } .cf-rank .bar i { display:block; height:100%; background:#D9A441; border-radius:4px; }
+.cf-rank .slots { display:flex; gap:8px; }
+.cf-mis { position:relative; min-height:212px; }
+.cf-mis .no { font-family:'IBM Plex Mono',monospace; font-size:12.5px; letter-spacing:2.5px; color:#8A929C; }
+.cf-mis .ti { font-family:'Source Serif 4',Georgia,serif; font-size:23px; font-weight:600; color:#E6E8EB; line-height:1.2; margin:4px 0 6px 0; }
+.cf-mis .tag { display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:11.5px; letter-spacing:1.5px; padding:2px 8px; border:1px solid #3A4350; border-radius:3px; color:#B4BAC2; margin-right:6px; }
+.cf-mis .tag.new { border-color:#6FA8DC; color:#6FA8DC; } .cf-mis .pip { letter-spacing:3px; color:#D97B3F; }
+.cf-mis .med { position:absolute; right:0; bottom:0; }
+.cf-objs { display:flex; gap:12px; flex-wrap:wrap; }
+.cf-obj { flex:1 1 180px; border:1px solid #2A313B; border-left:3px solid #6FA8DC; border-radius:6px; padding:12px 14px; background:#10141A; }
+.cf-obj .k { font-family:'IBM Plex Mono',monospace; font-size:11.5px; letter-spacing:2px; color:#8A929C; }
+.cf-obj .t { font-size:15px; color:#B4BAC2; margin-top:2px; } .cf-obj .v { font-family:'IBM Plex Mono',monospace; font-size:24px; color:#E6E8EB; margin:2px 0; }
+.cf-obj .s { font-size:13px; color:#8A929C; } .cf-obj.ok { border-left-color:#8FB39A; } .cf-obj.bad { border-left-color:#E06A50; }
+.cf-obj.ok .v { color:#8FB39A; } .cf-obj.bad .v { color:#E06A50; }
+.cf-brief { font-size:18.5px; line-height:1.5; color:#E6E8EB; }
+.cf-medals { display:flex; gap:18px; flex-wrap:wrap; align-items:center; color:#B4BAC2; font-size:14px; margin-top:14px; }
+.cf-medals span { display:inline-flex; align-items:center; gap:7px; }
+@keyframes cfpop { 0%{transform:scale(.2) rotate(-25deg);opacity:0} 60%{transform:scale(1.18) rotate(4deg);opacity:1} 100%{transform:scale(1) rotate(0)} }
+@keyframes cfin { 0%{transform:translateY(10px);opacity:0} 100%{transform:none;opacity:1} }
+@keyframes cfsweep { 0%{background-position:-400px 0} 100%{background-position:1600px 0} }
+@keyframes cfblink { 0%,100%{opacity:1} 50%{opacity:.35} }
+.cf-hero { display:flex; align-items:center; gap:20px; border:1px solid #2A313B; border-radius:8px; padding:14px 20px; margin:2px 0 14px 0;
+  background:linear-gradient(100deg,#171D26 0%,#10141A 55%,#0E1116 100%); position:relative; overflow:hidden; animation:cfin .35s ease-out; }
+.cf-hero::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:linear-gradient(90deg,transparent,#6FA8DC,transparent);
+  background-size:400px 2px; background-repeat:no-repeat; animation:cfsweep 3.2s linear infinite; }
+.cf-hero .no { font-family:'IBM Plex Mono',monospace; font-size:12.5px; letter-spacing:3px; color:#6FA8DC; }
+.cf-hero .ti { font-family:'Source Serif 4',Georgia,serif; font-size:30px; font-weight:600; color:#E6E8EB; line-height:1.15; }
+.cf-chip { display:inline-block; font-family:'IBM Plex Mono',monospace; font-size:11.5px; letter-spacing:1px; padding:2px 8px; border:1px solid #2F3742; border-radius:3px; color:#A3ABB5; margin:6px 6px 0 0; }
+.cf-stages { display:flex; align-items:center; gap:0; margin-left:auto; font-family:'IBM Plex Mono',monospace; font-size:11.5px; letter-spacing:1.5px; color:#5A626E; white-space:nowrap; }
+.cf-stages span { padding:5px 10px; border:1px solid #2A313B; margin-left:-1px; } .cf-stages span:first-child { border-radius:4px 0 0 4px; } .cf-stages span:last-child { border-radius:0 4px 4px 0; }
+.cf-stages .done { color:#8FB39A; } .cf-stages .now { color:#0E1116; background:#6FA8DC; border-color:#6FA8DC; font-weight:600; }
+.cf-tx { border-left:3px solid #6FA8DC; }
+.cf-tx .from { font-family:'IBM Plex Mono',monospace; font-size:12px; letter-spacing:2px; color:#6FA8DC; } .cf-tx .from i { display:inline-block; width:7px; height:7px; border-radius:50%; background:#6FA8DC; margin-right:8px; animation:cfblink 1.4s infinite; }
+.cf-outcome { display:flex; align-items:center; gap:18px; animation:cfin .4s ease-out; }
+.cf-outcome .m { animation:cfpop .7s cubic-bezier(.2,.9,.3,1.2) both; } .cf-outcome .w { font-family:'IBM Plex Mono',monospace; font-size:13px; letter-spacing:4px; }
+.cf-outcome .big { font-family:'Source Serif 4',Georgia,serif; font-size:30px; font-weight:600; line-height:1.15; color:#E6E8EB; }
+.cf-rankup { display:inline-block; margin-top:8px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; letter-spacing:2px; color:#0E1116; background:#D9A441; padding:3px 10px; border-radius:3px; animation:cfpop .8s .3s both; }
+.cf-event svg .p, .cf-event { animation:none; } .cf-event .eyebrow { animation:cfblink 1.2s infinite; }
+/* drawings size themselves; the Streamlit wrappers follow them (never set heights on wrappers from script: React reuses those nodes) */
+div[data-testid="stElementContainer"]:not([height="0px"]):has(> iframe) { height:auto !important; flex:0 0 auto !important; }
 </style>
 """
 

@@ -9,10 +9,14 @@ days (one per water temperature).
 import json
 
 
+SOUND = True        # set by the app from the Sound switch
+
+
 def kids_html(cycle, table, limit=27.0):
     from .art import ART
+    from .fx import SYNTH
     """cycle: dict(T=[4], P=[4], x4); table: list of dict(T, peak, bill, pue)."""
-    return _T.replace("__ART__", json.dumps(dict(hot=ART["hot"], ok=ART["ok"], cost=ART["cost"]))).replace("__C__", json.dumps(cycle)).replace("__TAB__", json.dumps(table)).replace("__LIM__", json.dumps(limit))
+    return _T.replace("__SYNTH__", SYNTH).replace("__SND__", json.dumps(bool(SOUND))).replace("__ART__", json.dumps(dict(hot=ART["hot"], ok=ART["ok"], cost=ART["cost"]))).replace("__C__", json.dumps(cycle)).replace("__TAB__", json.dumps(table)).replace("__LIM__", json.dumps(limit))
 
 
 _T = r"""
@@ -134,6 +138,9 @@ html,body{margin:0;background:transparent}
 </div>
 </div>
 <script>
+__SYNTH__
+const SND=__SND__;
+function fxk(cue,color,times,shake){ if(SND) cfCue(window,cue); if(color) cfFlash(document,color,times||1,!!shake); }
 const C=__C__, TAB=__TAB__, LIM=__LIM__, ARTS=__ART__;
 const $=id=>document.getElementById(id), NS="http://www.w3.org/2000/svg";
 function sv(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);p.appendChild(e);return e;}
@@ -166,9 +173,9 @@ function startDrag(e,k,c){ e.preventDefault(); const g=c.cloneNode(true); g.id="
   window.addEventListener("pointermove",mv); window.addEventListener("pointerup",up); }
 function moveGhost(e){ if(drag){ drag.g.style.left=(e.clientX-105)+"px"; drag.g.style.top=(e.clientY-40)+"px"; } }
 function drop(k,s){ if(s.classList.contains("full")) return; tries++;
-  if(s.dataset.slot===k){ placed[k]=true; s.classList.add("full"); s.innerHTML=""; const c=card(k); c.classList.add("inslot"); s.appendChild(c); pick=null; tray();
+  if(s.dataset.slot===k){ fxk("tick"); placed[k]=true; s.classList.add("full"); s.innerHTML=""; const c=card(k); c.classList.add("inslot"); s.appendChild(c); pick=null; tray();
     const left=4-Object.keys(placed).length; say(left? `Yes! The <b>${PARTS[k].n.toLowerCase()}</b> goes there. ${left} to go.` : "", "good"); if(!left) built(); }
-  else { s.classList.remove("bad"); void s.offsetWidth; s.classList.add("bad"); say("Not there. "+PARTS[k].no,"oops"); wrong++;
+  else { s.classList.remove("bad"); void s.offsetWidth; s.classList.add("bad"); say("Not there. "+PARTS[k].no,"oops"); wrong++; fxk("no","#E5574B");
     if(wrong>=3 && !$("giveup")){ $("btns").innerHTML='<button class="ghost" id="giveup" style="margin-left:0">I give up: show me</button>';
       $("giveup").onclick=()=>{ gave=true; ["comp","cond","valve","evap"].forEach(q=>{ if(!placed[q]) drop(q, document.querySelector(`.slot[data-slot=${q}]`)); }); }; } } }
 document.querySelectorAll(".slot").forEach(s=>s.addEventListener("click",()=>{ if(pick) drop(pick,s); }));
@@ -217,7 +224,8 @@ function built(){
 }
 function pop(stars,title,text,hint,ok,art){ const s = (art?`<div style="margin:-6px 0 -8px 0">${ARTS[art]}</div>`:"") + (stars===null ? "" : `<div class="st">${"★".repeat(stars)}<span style="color:#3A4350">${"★".repeat(3-stars)}</span></div>`);
   $("popb").innerHTML=s+`<h3>${title}</h3><p>${text}</p>`+(hint?`<div class="hint"><b>Hint:</b> ${hint}</div>`:"");
-  $("popok").textContent=ok||"Continue"; $("pop").style.display="flex"; $("kg").scrollIntoView({block:"start"}); try{ window.frameElement.scrollIntoView({block:"start",behavior:"smooth"}); }catch(e){} }
+  $("popok").textContent=ok||"Continue"; $("pop").style.display="flex";
+  if(art==="hot") fxk("fail","#E5574B",2,true); else if(art==="cost") fxk("meh","#D9A441"); else if(stars===3||stars===null) fxk("gold","#D9A441"); else fxk("win","#8FB39A"); $("kg").scrollIntoView({block:"start"}); try{ window.frameElement.scrollIntoView({block:"start",behavior:"smooth"}); }catch(e){} }
 function unpop(){ $("pop").style.display="none"; }
 $("popx").onclick=unpop; $("popok").onclick=unpop; $("pop").addEventListener("click",e=>{ if(e.target.id==="pop") unpop(); });
 function lesson(id,t){ const e=$(id); e.style.display="grid"; e.innerHTML=["You did","The machine did","So we learn"].map((h,i)=>`<div><span>${h}</span>${t[i]}</div>`).join(""); }
@@ -255,8 +263,7 @@ function level2(){ $("give2").onclick=()=>{ $("tw").value=best.T; l2draw(); pop(
     $("btns2").innerHTML= stars===3 ? '<button class="big" id="again">Play again</button><span style="margin-left:14px;color:#B4BAC2;font-size:15px">Ready for the real thing? Open <b>Work orders</b> at the top and play First Shift.</span>' : '';
     const a=$("again"); if(a) a.onclick=()=>{ $("lesson2").style.display="none"; $("btns2").innerHTML=""; $("tw").value=TAB[0].T; l2draw(); $("msg2").innerHTML=`Goal: keep every server under <b>${LIM} °C</b> and spend as little as you can.`; }; fitNow(); }; }
 function fitNow(){ try{ const fe=window.frameElement; if(!fe) return; const h=Math.ceil($("kg").getBoundingClientRect().height)+8;
-  if(Math.abs(parseFloat(fe.style.height||0)-h)>3){ fe.style.height=h+"px"; fe.setAttribute("height",h);
-    const p=fe.parentElement; if(p && p.children.length===1) p.style.height=h+"px"; } }catch(e){} }
+  if(Math.abs(parseFloat(fe.style.height||0)-h)>3){ fe.style.height=h+"px"; fe.setAttribute("height",h); } }catch(e){} }
 tray(); fitNow(); try{ new ResizeObserver(fitNow).observe($("kg")); }catch(e){}
 </script>
 """

@@ -135,8 +135,7 @@ function show(){ const p=INFO[sel]();
   document.querySelectorAll("#cv .c").forEach(g=>g.classList.toggle("sel",g.dataset.c===sel)); fit(); }
 document.querySelectorAll("#cv .c").forEach(g=>g.addEventListener("click",()=>{sel=g.dataset.c;show();}));
 function fit(){ try{ const fe=window.frameElement; if(!fe) return; const h=Math.ceil($("cv").getBoundingClientRect().height)+8;
-  if(Math.abs(parseFloat(fe.style.height||0)-h)>3){ fe.style.height=h+"px"; fe.setAttribute("height",h);
-    const p=fe.parentElement; if(p && p.children.length===1) p.style.height=h+"px"; } }catch(e){} }
+  if(Math.abs(parseFloat(fe.style.height||0)-h)>3){ fe.style.height=h+"px"; fe.setAttribute("height",h); } }catch(e){} }
 show(); try{ new ResizeObserver(fit).observe($("cv")); }catch(e){}
 </script>
 """

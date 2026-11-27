@@ -61,6 +61,9 @@ def frames_from_day(day, every_s=300):
     )
 
 
+SOUND = True        # set by the app from the Sound switch
+
+
 def plant_html(day, autoplay=False, start="hot", focus="chiller", compact=False, fx=None):
     """fx: optional dict(head=str, items=[dict(dev=..., text=...)]) describing what
     a change of settings did; the named equipment is lit when the drawing opens."""
@@ -72,9 +75,10 @@ def plant_html(day, autoplay=False, start="hot", focus="chiller", compact=False,
                chws=s.T_chws_C, dT=s.dT_chw, dTcw=s.dT_cw, events=ev, autoplay=autoplay, start=start, focus=focus, compact=compact,
                tankt=round(s.tank_mass / 1e3), tankMWh=s.tank_MWh, cap=s.chiller_cap_MW, fc=bool(s.free_cooling),
                hx=s.hx_approach, mchwd=round(s.Q_design / (CP_W * 6.0), 1), mcwd=round(1.17 * s.Q_design / (CP_W * 5.0), 1),
-               dP=s.dP_chw_kPa, peff=s.pump_eff, pmeff=s.pump_motor_eff, stat=s.static_head_frac, fx=fx,
+               snd=bool(SOUND), dP=s.dP_chw_kPa, peff=s.pump_eff, pmeff=s.pump_motor_eff, stat=s.static_head_frac, fx=fx,
                qd=round(s.Q_design / 1e6, 3), eta0=s.eta_rated)
-    return _TEMPLATE.replace("__DATA__", json.dumps(data)).replace("__CFG__", json.dumps(cfg))
+    from .fx import SYNTH
+    return _TEMPLATE.replace("__SYNTH__", SYNTH).replace("__DATA__", json.dumps(data)).replace("__CFG__", json.dumps(cfg))
 
 
 _TEMPLATE = r"""
@@ -268,6 +272,7 @@ _TEMPLATE = r"""
 <div id="panel"><div id="p_left"></div><div id="p_mid"></div><div id="p_right"></div></div>
 </div>
 <script>
+__SYNTH__
 const D = __DATA__, C = __CFG__;
 const N = D.hour.length;
 const $ = id => document.getElementById(id);
@@ -338,6 +343,7 @@ const f1=v=>v.toFixed(1), f2=v=>v.toFixed(2), f0=v=>Math.round(v).toLocaleString
 const itMax=Math.max(...D.itreq), itMin=Math.min(...D.itreq);
 const pcMax=Math.max(1e-6,...D.wcomp.map((w,k)=>(w+D.pchw[k]+D.pcw[k]+D.pfan[k])/1e3));
 const mNom=C.qd*1e6/(4186*C.dT), mMax=1.5*Math.max(C.mchwd,mNom);
+let wasBad=false;
 let i=0, timer=null, dash=0, sel=C.focus||"chiller", mode="all", explore=false, selPipe=null, wf=100, fxUntil=0, fxHover=null;
 if(sel==="pumps") sel="pump_chw";
 
@@ -588,6 +594,9 @@ function draw(){
   else if(D.short[i]>0.01) msg=`Cooling short by ${f2(D.short[i])} MW`;
   else if(tripped) msg="Chiller offline";
   else { const e=C.events.find(e=>h>=e.t && h<Math.min(e.until,e.t+1.5)); if(e){msg=e.title; colr="#D9A441";} }
+  const bad = msg && colr==="#E06A50";            // sound and flash when an alarm starts or clears during the replay
+  if(timer && !C.autoplay && bad!==wasBad){ if(C.snd) cfCue(window, bad?"blip":"clear"); cfFlash(document, bad?"#E5574B":"#8FB39A", 1, false); }
+  wasBad=bad;
   $("alert_bg").setAttribute("opacity", msg?1:0); $("alert_bg").setAttribute("fill", colr); $("alert_tx").textContent=msg;
   $("hud_pue").textContent=D.pue[i]>0 ? D.pue[i].toFixed(3) : "—";
   $("hud_cop").textContent= D.cop[i]>0 ? f1(D.cop[i]) : "off";
@@ -651,8 +660,7 @@ buildTimeline(); right(); draw(); animate();
 if(C.autoplay){ i=0; $("play").click(); }
 // make the frame as tall as its content, so nothing is cut off and no space is wasted
 function fit(){ try{ const fe=window.frameElement; if(!fe) return; const h=Math.ceil($("pv").getBoundingClientRect().height)+8;
-  if(Math.abs(parseFloat(fe.style.height||0)-h)>3){ fe.style.height=h+"px"; fe.setAttribute("height",h);
-    const p=fe.parentElement; if(p && p.children.length===1) p.style.height=h+"px"; } }catch(e){} }
+  if(Math.abs(parseFloat(fe.style.height||0)-h)>3){ fe.style.height=h+"px"; fe.setAttribute("height",h); } }catch(e){} }
 try{ new ResizeObserver(fit).observe($("pv")); }catch(e){} fit();
 </script>
 """

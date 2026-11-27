@@ -82,7 +82,7 @@ def _first_shift(i):
                "do less work for the same cooling. The limit is the 27 °C server inlet: the racks receive the "
                "water plus 8 K.",
         passing=(dict(T_chws_C=14.0),), solution=(dict(T_chws_C=17.0),),
-        guide=("Press <b>Start shift</b>. The day runs with the settings as they are.",
+        guide=("Press <b>Start mission</b>. The day runs with the settings as they are.",
                "Read the result. The servers were safe, but the PUE missed its target.",
                "Open <b>Chilled water</b> and raise the supply temperature to about 17 °C. Run the shift again.",
                "Click a chiller in the drawing to see its cycle: evaporating temperature, lift and COP.") if i == 0 else ())

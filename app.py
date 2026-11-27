@@ -39,7 +39,8 @@ from ui.plant_view import plant_html
 from ui.cycle_view import cycle_html
 from ui.kids_view import kids_html
 from ui import tour as T
-from ui import explain, ask
+from ui import explain, ask, fx as FX
+from ui import plant_view as _pv, kids_view as _kv
 from ui.art import ART, alert
 
 st.set_page_config(page_title="COLDFRONT", page_icon="❄", layout="wide", initial_sidebar_state="collapsed")
@@ -322,6 +323,41 @@ def _ask_box(day, key):
             colm.button(ask.TOPICS[k][0], key=f"{key}alt{k}", width="stretch", on_click=put, args=(ask.TOPICS[k][0],))
 
 
+MEDAL = {"A": "#D9A441", "B": "#B8C0CC", "C": "#B07A4A", "D": "#4A525E", None: "#2A313B"}
+DIFF = dict(first_shift=1, heatwave=2, chiller_down=2, price_spike=2, not_a_drop=3, blackwell=2)
+THREAT = dict(first_shift="WASTED POWER", heatwave="HEAT + WATER LIMIT", chiller_down="EQUIPMENT FAILURE", price_spike="PRICE SPIKE",
+              not_a_drop="NO WATER", blackwell="NEW HARDWARE")
+
+
+def medal(g, size=40):
+    """A grade drawn as a medal; an empty ring when there is no grade yet."""
+    c = MEDAL[g]
+    if g is None:
+        return f'<svg width="{size}" height="{size}" viewBox="0 0 40 40"><circle cx="20" cy="20" r="15" fill="none" stroke="{c}" stroke-width="2" stroke-dasharray="3 4"/></svg>'
+    return (f'<svg width="{size}" height="{size}" viewBox="0 0 40 40"><path d="M12 3 L20 17 L28 3" fill="none" stroke="{c}" stroke-width="3" opacity=".55"/>'
+            f'<circle cx="20" cy="23" r="14" fill="#10141A" stroke="{c}" stroke-width="2.5"/><circle cx="20" cy="23" r="10" fill="none" stroke="{c}" stroke-width="1" opacity=".5"/>'
+            f'<text x="20" y="28.5" text-anchor="middle" font-family="Source Serif 4,Georgia,serif" font-size="15" font-weight="700" fill="{c}">{g}</text></svg>')
+
+
+OUTCOME = {"A": ("MISSION COMPLETE", "Gold medal", "#D9A441"), "B": ("MISSION COMPLETE", "Silver medal", "#B8C0CC"),
+           "C": ("MISSION INCOMPLETE", "Bronze medal", "#B07A4A"), "D": ("MISSION FAILED", "No medal yet", "#E5574B")}
+
+
+def outcome_html(grade, rankup=None):
+    w, m, c = OUTCOME[grade]
+    return (f'<div class="cf-outcome"><div class="m">{medal(grade, 92)}</div><div><div class="w" style="color:{c}">{w}</div>'
+            f'<div class="big">{m} · grade {grade}</div>'
+            + (f'<div class="cf-rankup">RANK UP · {rankup.upper()}</div>' if rankup else "") + "</div></div>")
+
+
+def rank_of(grades):
+    cleared = sum(1 for g in grades.values() if g in "AB")
+    gold = sum(1 for g in grades.values() if g == "A")
+    if gold == len(ORDERS):
+        return "Chief engineer", cleared, gold
+    return ["Trainee", "Operator", "Operator", "Shift lead", "Shift lead", "Plant engineer", "Plant engineer"][cleared], cleared, gold
+
+
 HEAD = {"A": "You scored an A!", "B": "You scored a B. It works.", "C": "You scored a C. Nearly.", "D": "You scored a D. Don't worry, try again."}
 
 
@@ -347,8 +383,11 @@ def answer_html(o):
             f"<b>Why.</b> {o.lesson}")
 
 
-@st.dialog("Shift complete", width="large")
-def result_popup(o, grade, rows, fx, retry, give_up):
+def result_popup(o, grade, rows, fx, retry, give_up, rankup=None):
+    st.dialog(OUTCOME[grade][0].title(), width="large")(_result_popup)(o, grade, rows, fx, retry, give_up, rankup)
+
+
+def _result_popup(o, grade, rows, fx, retry, give_up, rankup):
     """The moment the grade lands: what you got, why, and what to try next."""
     missed = [r for r in rows if not r["met"]]
     names = " ".join(r["target"].lower() for r in missed)
@@ -361,7 +400,9 @@ def result_popup(o, grade, rows, fx, retry, give_up):
     else:
         kind, eyebrow, colr, title = "cost", f"GRADE {grade}", "#D9A441", "Safe, but wasteful"
     sub = VERDICT[grade] if grade in "AB" else ("Don't worry. Read the hint and try again." if grade == "D" else "The servers were fine. The plant used more than it needed to.")
-    st.markdown(alert(kind, eyebrow, title, sub, colr), unsafe_allow_html=True)
+    st.markdown(outcome_html(grade, rankup), unsafe_allow_html=True)
+    if grade in "CD":
+        st.markdown(alert(kind, eyebrow.replace(f" · GRADE {grade}", "").replace(f"GRADE {grade}", "REVIEW"), title, sub, colr), unsafe_allow_html=True)
     eff = [r for r in rows if r["kind"] != "safety"]
     if grade in "AB":
         won = "; ".join(f"{r['target']} {_val(r, r['achieved'])} against a limit of {_val(r, r['limit'])}" for r in eff)
@@ -428,6 +469,9 @@ def _replay_tour():                      # replay the tour of the page the visit
 
 
 _nav[1].button("Take the tour", width="stretch", on_click=_replay_tour, icon=":material/explore:")
+st.session_state.setdefault("cf_sound", True)
+SND = _nav[1].toggle("Sound", key="cf_sound", help="Short sound cues when something goes right or wrong. Flashes stay on either way.")
+_pv.SOUND = _kv.SOUND = bool(SND)
 _tf = st.session_state.get("tour_force", ("", 0))
 FORCE = _tf[1] if _tf[0] == view else None
 
@@ -480,20 +524,31 @@ elif view == "Work orders":
     key = st.session_state.get("wo_key")
     if key not in WORK_ORDERS:
         st.markdown("### Work orders")
-        st.caption("Each is one shift at a client's site. All are open; the order below is the recommended one.")
+        G = st.session_state["grades"]
+        rank, cleared, gold = rank_of(G)
+        nxt = next((o.key for o in ORDERS if G.get(o.key) not in ("A", "B")), None)
+        card(f'<div><span class="cf-mono">YOUR RANK</span><div class="r">{rank}</div></div>'
+             f'<div style="flex:1"><div class="cf-mono" style="margin-bottom:7px">{cleared} OF {len(ORDERS)} SHIFTS CLEARED · {gold} GOLD</div>'
+             f'<div class="bar"><i style="width:{100 * cleared / len(ORDERS):.0f}%"></i></div></div>'
+             f'<div class="slots">{"".join(medal(G.get(o.key), 38) for o in ORDERS)}</div>', "cf-rank")
+        st.caption("Six shifts, six different problems. Clear a shift to earn its medal. All are open; this is the suggested order.")
         for i in range(0, len(ORDERS), 3):
             cols = st.columns(3)
             for colm, o in zip(cols, ORDERS[i:i + 3]):
                 with colm:
-                    g = st.session_state["grades"].get(o.key)
-                    card(f'<div style="min-height:150px;position:relative" class="cf-wocard">'
-                         f'<svg viewBox="0 0 140 90" width="124" style="position:absolute;top:-2px;right:-4px">{ART[o.key]}</svg>'
-                         f'<div style="padding-right:128px;min-height:84px"><span class="cf-mono">WORK ORDER {o.number} · {o.client}</span><br>'
-                         f'<span style="font-size:19px;font-weight:600">{o.title}</span>'
-                         f'{"<br><span class=cf-badge style=margin-left:0>BEST SO FAR · " + g + "</span>" if g else ""}</div>'
-                         f'<span style="color:#B4BAC2">{BLURB[o.key]}</span></div>')
-                    st.button("Open", key="open" + o.key, width="stretch", on_click=go, args=("Work orders",),
-                              kwargs=dict(wo_key=o.key))
+                    g = G.get(o.key)
+                    card(f'<div class="cf-mis cf-wocard">'
+                         f'<svg viewBox="0 0 140 90" width="150" style="position:absolute;top:-4px;right:-6px">{ART[o.key]}</svg>'
+                         f'<div style="padding-right:140px;min-height:104px"><span class="no">MISSION {o.number}</span>'
+                         f'<div class="ti">{o.title}</div><span class="cf-mono">{o.client}</span></div>'
+                         f'<div style="margin:8px 0 10px 0"><span class="tag">{THREAT[o.key]}</span>'
+                         f'<span class="tag"><span class="pip">{"●" * DIFF[o.key]}</span><span style="letter-spacing:3px;color:#3A4350">{"●" * (3 - DIFF[o.key])}</span></span>'
+                         f'{"" if g else "<span class=\"tag new\">NEW</span>"}</div>'
+                         f'<div style="color:#B4BAC2;padding-right:{50 if g else 0}px">{BLURB[o.key]}</div>'
+                         f'<div class="med">{medal(g, 46) if g else ""}</div></div>')
+                    st.button("Replay" if g else "Play", key="open" + o.key, width="stretch", on_click=go, args=("Work orders",),
+                              kwargs=dict(wo_key=o.key), type="primary" if o.key == nxt else "secondary",
+                              icon=":material/replay:" if g else ":material/play_arrow:")
         T.tour("list", T.LIST, FORCE)
     else:
         var = st.session_state.setdefault("wo_var_" + key, 0)
@@ -513,33 +568,40 @@ elif view == "Work orders":
         def reset_plant():
             st.session_state.pop("wo_last_" + key, None)
             st.session_state["wo_try_" + key] = tries + 1
-        top = st.columns([5, 1])
-        top[0].markdown(f'<span class="cf-mono">WORK ORDER {o.number} · SET {SETS[var]} · {o.client} · {CLIMATES[o.climate].label} · '
-                        f'{WORKLOADS[o.workload].label}</span>', unsafe_allow_html=True)
-        top[0].markdown(f"### {o.title}")
-        top[1].button("All work orders", width="stretch", on_click=go, args=("Work orders",), kwargs=dict(wo_key=None))
         pauses = o.pauses
         stage = len(plans)
         finished = stage > len(pauses)
+        names = ["BRIEFING"] + [f"EVENT {int(t):02d}:{int(t % 1 * 60):02d}" for t in pauses] + ["DEBRIEF"]
+        now = len(names) - 1 if finished else stage
+        stage_html = "".join('<span class="%s">%s</span>' % ("done" if k < now else "now" if k == now else "", ("✓ " if k < now else "") + n)
+                             for k, n in enumerate(names))
+        top = st.columns([6, 1])
+        top[0].markdown(
+            f'<div class="cf-hero"><svg viewBox="0 0 140 90" width="96" style="flex:none">{ART[o.key]}</svg>'
+            f'<div><div class="no">MISSION {o.number} · {THREAT[o.key]}</div><div class="ti">{o.title}</div>'
+            f'<span class="cf-chip">{o.client}</span><span class="cf-chip">{CLIMATES[o.climate].label}</span>'
+            f'<span class="cf-chip">{WORKLOADS[o.workload].label}</span><span class="cf-chip">SET {SETS[var]}</span></div>'
+            f'<div class="cf-stages">{stage_html}</div></div>',
+            unsafe_allow_html=True)
+        top[1].button("All missions", width="stretch", on_click=go, args=("Work orders",), kwargs=dict(wo_key=None), icon=":material/grid_view:")
         until = 24.0 if finished or stage == 0 else pauses[stage - 1]
 
-        def targets_table(rows=None):
-            h = "<table class='cf-t'><tr><th>Target</th><th>Limit</th>" + ("<th>Achieved</th><th>Margin</th><th></th>" if rows else "<th>For an A</th>") + "</tr>"
+        def targets_table(rows=None, so_far=False):
+            h = f'<div class="cf-mono" style="margin-bottom:10px">{"OBJECTIVES · STATUS SO FAR" if so_far else "OBJECTIVES"}</div><div class="cf-objs">'
             for i, t in enumerate(o.targets):
                 f = f"{{:,.{t.nd}f}}"
-                lim = f"≤ {f.format(t.limit)} {t.unit}"
+                kind = "KEEP IT SAFE" if t.kind == "safety" else "RUN IT LEAN"
                 if rows:
                     r = rows[i]
-                    colr = "#8FB39A" if r["met"] else "#E06A50"
-                    h += (f"<tr><td>{t.label}</td><td class='n'>{lim}</td><td class='n'>{f.format(r['achieved'])} {t.unit}</td>"
-                          f"<td class='n' style='color:{colr}'>{'+' if r['margin'] >= 0 else '−'}{f.format(abs(r['margin']))} {t.unit}</td>"
-                          f"<td style='color:{colr}'>{'inside' if r['met'] else 'outside'}</td></tr>")
+                    gold = r["met"] and t.a_level is not None and r["achieved"] <= t.a_level + 1e-9
+                    h += (f'<div class="cf-obj {"ok" if r["met"] else "bad"}"><div class="k">{"✓" if r["met"] else "✗"} {kind}</div><div class="t">{t.label}</div>'
+                          f'<div class="v">{f.format(r["achieved"])} {t.unit}</div><div class="s">goal ≤ {f.format(t.limit)} {t.unit} · '
+                          f'{f.format(abs(r["margin"]))} {t.unit} {"inside" if r["met"] else "over"}{" · gold level" if gold else ""}</div></div>')
                 else:
-                    a = f"≤ {f.format(t.a_level)} {t.unit}" if t.a_level is not None else "meet the limit"
-                    h += f"<tr><td>{t.label}</td><td class='n'>{lim}</td><td class='n'>{a}</td></tr>"
-            return (h + "</table><div class='cf-mono' style='margin-top:8px'>PUE = total power ÷ computer power; lower is better. "
-                    "Server inlet = temperature of the air (or coolant) reaching the servers. "
-                    "Compute lost = work the GPUs skipped because they got too hot.</div>")
+                    a = f"for gold: ≤ {f.format(t.a_level)} {t.unit}" if t.a_level is not None else "must hold all day"
+                    h += (f'<div class="cf-obj"><div class="k">{kind}</div><div class="t">{t.label}</div>'
+                          f'<div class="v">≤ {f.format(t.limit)} {t.unit}</div><div class="s">{a}</div></div>')
+            return h + "</div>"
 
         def guide(step):
             if o.guide and step < len(o.guide):
@@ -548,11 +610,17 @@ elif view == "Work orders":
         if stage == 0:                                   # ---- briefing
             jl, jr = st.columns([2.3, 1], gap="medium")
             with jl:
-                card(f"<b>The job.</b> {o.brief}<br><br><b>How it is scored.</b> Each attempt earns a grade for the setup you chose. A: every target met, with room "
-                     f"to spare. B: every target met. C: servers safe, efficiency missed. D: a safety limit crossed. Retry as often as you like.", "cf-card cf-job")
+                card(f'<div style="display:flex;gap:18px;align-items:flex-start">'
+                     f'<div><span class="from"><i></i>INCOMING · {o.client.upper()}</span><div class="cf-brief">{o.brief}</div></div></div>'
+                     f'<div class="cf-medals"><span>{medal("A", 30)} every objective, with room to spare</span><span>{medal("B", 30)} every objective</span>'
+                     f'<span>{medal("C", 30)} safe, but not lean</span><span>{medal("D", 30)} a safety limit crossed</span></div>'
+                     f'<div class="cf-mono" style="margin-top:8px">Each attempt earns a grade. Retry as often as you like.</div>', "cf-card cf-job cf-tx")
                 if o.events:
-                    card("<b>Expect:</b> the shift pauses when something happens, so you can change the plant and resume.", "cf-note")
+                    card("<b>Heads up:</b> something will happen mid-shift. The day pauses so you can change the plant and resume.", "cf-note")
                 card(targets_table(), "cf-card cf-targets")
+                with st.expander("What do these words mean?"):
+                    st.markdown("**PUE** = total power ÷ computer power; lower is better.  \n**Server inlet** = temperature of the air (or coolant) reaching the servers.  \n"
+                                "**Compute lost** = work the GPUs skipped because they got too hot.")
                 guide(2 if ("wo_prev_" + key) in st.session_state else 0)
             with jr.container(key="cf_ctl"):
                 st.markdown(step("→", "Set the plant, then start", "Open a control, change it, click outside to close."), unsafe_allow_html=True)
@@ -561,8 +629,8 @@ elif view == "Work orders":
                     st.caption("These are the settings from your last attempt.")
                 fixed = [LOCK_NAMES[k] for k in o.locks if k in LOCK_NAMES]
                 if fixed:
-                    st.caption("Fixed by this work order: " + ", ".join(fixed) + ".")
-                st.button("Start shift", type="primary", width="stretch", on_click=lambda: plans.append(v), icon=":material/play_arrow:")
+                    st.caption("Fixed in this mission: " + ", ".join(fixed) + ".")
+                st.button("Start mission", type="primary", width="stretch", on_click=lambda: plans.append(v), icon=":material/play_arrow:")
                 st.button("New numbers", width="stretch", on_click=new_numbers, key="nn0", icon=":material/casino:",
                           help="Same problem with different numbers. There are three sets.")
                 if last:
@@ -578,16 +646,18 @@ elif view == "Work orders":
                 kind = dict(trip="trip", heat="heat", load="load").get(ev.kind, "price")
                 card(alert(kind, f"{'⚠ ' if ev.kind == 'trip' else ''}PAUSED AT {int(ev.t):02d}:{int(ev.t % 1 * 60):02d}", ev.title, ev.text,
                            "#E5574B" if ev.kind == "trip" else "#D9A441"), ("cf-alert" if ev.kind == "trip" else "cf-note") + " cf-event")
+                FX.fire("alarm" if ev.kind == "trip" else "notice", f"{key}-{var}-{tries}-p{stage}", SND)
                 dflt = dict(plans[-1])
                 if last and stage < len(last):               # repeat what you changed at this pause last time
                     dflt.update({k: x for k, x in last[stage].items() if last[stage - 1].get(k) != x})
+                card(targets_table(evaluate(o, day.metrics)[1], so_far=True), "cf-card cf-targets")
                 pl, pr = st.columns([3.1, 1], gap="medium")
                 with pr.container(key="cf_ctl"):
                     st.markdown(step("→", "Change the plant, then resume", "What you set applies from now to the end of the day."), unsafe_allow_html=True)
                     if dflt != plans[-1]:
                         st.caption("The change you made at this pause last time is already applied.")
                     v = settings_toolbar(f"wo{key}{var}t{tries}s{stage}", o.locks, dflt, o.limits, vertical=True)
-                    st.button("Resume shift", type="primary", width="stretch", on_click=lambda: plans.append(v), icon=":material/play_arrow:")
+                    st.button("Resume mission", type="primary", width="stretch", on_click=lambda: plans.append(v), icon=":material/play_arrow:")
                     st.button("Restart", width="stretch", on_click=lambda: plans.clear(), icon=":material/replay:")
                     with st.expander("Hint"):
                         st.write(o.hint)
@@ -597,13 +667,17 @@ elif view == "Work orders":
             else:                                        # ---- debrief
                 grade, rows = evaluate(o, day.metrics)
                 best = st.session_state["grades"].get(key)
-                if best is None or grade < best:
+                if (best is None or grade < best) and not st.session_state.get("wo_gave_up_" + key):   # a played answer earns no medal
+                    r0 = rank_of(st.session_state["grades"])[0]
                     st.session_state["grades"][key] = grade
-                a, b = st.columns([1, 2.4])
-                colr = {"A": "#D9A441", "B": "#D9A441", "C": "#D9A441", "D": "#8A929C"}[grade]
+                    r1 = rank_of(st.session_state["grades"])[0]
+                    if r1 != r0:
+                        st.session_state["wo_rankup_" + key] = (var, tries, r1)
+                ru = st.session_state.get("wo_rankup_" + key)
+                rankup = ru[2] if ru and ru[:2] == (var, tries) else None
+                a, b = st.columns([1, 2.1])
                 with a:
-                    card(f'<span class="cf-mono">SHIFT COMPLETE</span><br><span class="cf-grade" style="color:{colr}">{grade}</span><br>'
-                         + VERDICT[grade], "cf-card cf-gradecard")
+                    card(outcome_html(grade, rankup) + f'<div style="margin-top:10px;color:#B4BAC2">{VERDICT[grade]}</div>', "cf-card cf-gradecard")
                 with b:
                     card(targets_table(rows), "cf-card cf-targets")
                 if o.guide:
@@ -641,7 +715,7 @@ elif view == "Work orders":
                 nxt = ORDERS[(ORDERS.index(WORK_ORDERS[key]) + 1) % len(ORDERS)]
                 c[1].button("New numbers", width="stretch", on_click=new_numbers, key="nn1",
                             help="Same problem with different numbers. There are three sets.")
-                c[2].button(f"Next: {nxt.title}", width="stretch", on_click=go, args=("Work orders",), kwargs=dict(wo_key=nxt.key))
+                c[2].button(f"Next mission: {nxt.title}", width="stretch", type="primary" if grade in "AB" else "secondary", icon=":material/arrow_forward:", on_click=go, args=("Work orders",), kwargs=dict(wo_key=nxt.key))
                 fx = None
                 if last and len(last) == len(plans):            # what changed since the previous attempt, and what it did
                     when = ["at the start"] + [f"at {int(t):02d}:{int(t % 1 * 60):02d}" for t in pauses]
@@ -651,7 +725,8 @@ elif view == "Work orders":
                 attempt = (var, tries)                           # the pop-up opens once for each finished attempt
                 if st.session_state.get("wo_pop_" + key) != attempt and not st.session_state.get("wo_gave_up_" + key):
                     st.session_state["wo_pop_" + key] = attempt
-                    result_popup(o, grade, rows, fx, again, give_up)
+                    FX.fire(dict(A="gold", B="win", C="meh", D="fail")[grade], f"{key}-{var}-{tries}-r", SND, rank=bool(rankup))
+                    result_popup(o, grade, rows, fx, again, give_up, rankup)
                 else:
                     T.tour("result", T.RESULT, FORCE)
 
